@@ -5870,7 +5870,10 @@ class TerminalController {
             v2MaybeFocusWindow(for: tabManager)
             v2MaybeSelectWorkspace(tabManager, workspace: ws)
 
-            let sourceSurfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            let sourceSurfaceId =
+                v2UUID(params, "surface_id") ??
+                ws.focusedPanelId ??
+                orderedPanels(in: ws).first?.id
             guard let sourceSurfaceId else {
                 result = .err(code: "not_found", message: "No focused surface to split", data: nil)
                 return
