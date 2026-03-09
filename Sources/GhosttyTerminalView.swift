@@ -4547,6 +4547,12 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         dlog("terminal.mouseDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") mods=[\(debugModifierString(event.modifierFlags))] clickCount=\(event.clickCount) point=(\(String(format: "%.0f", debugPoint.x)),\(String(format: "%.0f", debugPoint.y)))")
         #endif
         window?.makeFirstResponder(self)
+        if let terminalSurface {
+            TerminalNotificationStore.shared.dismissUnreadNotificationIfActive(
+                tabId: terminalSurface.tabId,
+                surfaceId: terminalSurface.id
+            )
+        }
         guard let surface = surface else { return }
         let point = convert(event.locationInWindow, from: nil)
         ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, modsFromEvent(event))

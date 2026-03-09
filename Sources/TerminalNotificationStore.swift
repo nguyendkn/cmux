@@ -820,6 +820,14 @@ final class TerminalNotificationStore: ObservableObject {
         indexes.unreadByTabSurface.contains(TabSurfaceKey(tabId: tabId, surfaceId: surfaceId))
     }
 
+    @discardableResult
+    func dismissUnreadNotificationIfActive(tabId: UUID, surfaceId: UUID?) -> Bool {
+        guard AppFocusState.isAppActive() else { return false }
+        guard hasUnreadNotification(forTabId: tabId, surfaceId: surfaceId) else { return false }
+        markRead(forTabId: tabId, surfaceId: surfaceId)
+        return true
+    }
+
     func latestNotification(forTabId tabId: UUID) -> TerminalNotification? {
         indexes.latestUnreadByTabId[tabId] ?? indexes.latestByTabId[tabId]
     }
