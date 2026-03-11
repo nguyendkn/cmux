@@ -4166,6 +4166,55 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         return selected.isEmpty ? nil : selected
     }
 
+#if DEBUG
+    private func debugFirstResponderPanelLabel() -> String {
+        guard let window else { return "nil" }
+        return cmuxOwningGhosttyView(for: window.firstResponder)?
+            .terminalSurface?
+            .id
+            .uuidString
+            .prefix(5)
+            .description ?? "nil"
+    }
+
+    private func debugWorkspaceFocusSuffix() -> String {
+        let workspaceId = terminalSurface?.tabId ?? tabId
+        let workspaceShort = workspaceId.map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let firstResponderPanel = debugFirstResponderPanelLabel()
+        guard let workspaceId,
+              let appDelegate = AppDelegate.shared else {
+            return
+                "workspace=\(workspaceShort) pane=nil focusedPane=nil selectedPanel=nil " +
+                "focusedPanel=nil firstResponderPanel=\(firstResponderPanel)"
+        }
+
+        let manager = appDelegate.tabManagerFor(tabId: workspaceId) ?? appDelegate.tabManager
+        guard let workspace = manager?.tabs.first(where: { $0.id == workspaceId }) else {
+            return
+                "workspace=\(workspaceShort) pane=nil focusedPane=nil selectedPanel=nil " +
+                "focusedPanel=nil firstResponderPanel=\(firstResponderPanel)"
+        }
+
+        let panelId = terminalSurface?.id
+        let paneId = panelId.flatMap { workspace.paneId(forPanelId: $0) }
+        let paneShort = paneId.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let focusedPaneShort = workspace.bonsplitController.focusedPaneId
+            .map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let selectedTab = workspace.bonsplitController.focusedPaneId
+            .flatMap { workspace.bonsplitController.selectedTab(inPane: $0) }
+        let selectedPanelShort = selectedTab
+            .flatMap { workspace.panelIdFromSurfaceId($0.id) }
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let focusedPanelShort = workspace.focusedPanelId
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+
+        return
+            "workspace=\(workspaceShort) pane=\(paneShort) focusedPane=\(focusedPaneShort) " +
+            "selectedPanel=\(selectedPanelShort) focusedPanel=\(focusedPanelShort) " +
+            "firstResponderPanel=\(firstResponderPanel)"
+    }
+#endif
+
     override var acceptsFirstResponder: Bool { true }
 
     override func becomeFirstResponder() -> Bool {
@@ -4181,7 +4230,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             // the old view from stealing focus and creating model/surface divergence.
             if suppressingReparentFocus {
 #if DEBUG
-                dlog("focus.firstResponder SUPPRESSED (reparent) surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
+                dlog(
+                    "focus.firstResponder SUPPRESSED (reparent) " +
+                    "surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") \(debugWorkspaceFocusSuffix())"
+                )
 #endif
                 return result
             }
@@ -4198,7 +4250,8 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 #if DEBUG
                 dlog(
                     "focus.firstResponder SUPPRESSED (hidden_or_tiny) surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
-                    "frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) hidden=\(hiddenInHierarchy ? 1 : 0)"
+                    "frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) " +
+                    "hidden=\(hiddenInHierarchy ? 1 : 0) \(debugWorkspaceFocusSuffix())"
                 )
 #endif
             }
@@ -4206,9 +4259,15 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         if result, shouldApplySurfaceFocus, let surface = ensureSurfaceReadyForInput() {
             let now = CACurrentMediaTime()
             let deltaMs = (now - lastScrollEventTime) * 1000
-            Self.focusLog("becomeFirstResponder: surface=\(terminalSurface?.id.uuidString ?? "nil") deltaSinceScrollMs=\(String(format: "%.2f", deltaMs))")
+            Self.focusLog(
+                "becomeFirstResponder: surface=\(terminalSurface?.id.uuidString ?? "nil") " +
+                "\(debugWorkspaceFocusSuffix()) deltaSinceScrollMs=\(String(format: "%.2f", deltaMs))"
+            )
 #if DEBUG
-            dlog("focus.firstResponder surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
+            dlog(
+                "focus.firstResponder surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+                "\(debugWorkspaceFocusSuffix())"
+            )
             if let terminalSurface {
                 AppDelegate.shared?.recordJumpUnreadFocusIfExpected(
                     tabId: terminalSurface.tabId,
@@ -4248,7 +4307,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         if result, let surface = surface {
             let now = CACurrentMediaTime()
             let deltaMs = (now - lastScrollEventTime) * 1000
-            Self.focusLog("resignFirstResponder: surface=\(terminalSurface?.id.uuidString ?? "nil") deltaSinceScrollMs=\(String(format: "%.2f", deltaMs))")
+            Self.focusLog(
+                "resignFirstResponder: surface=\(terminalSurface?.id.uuidString ?? "nil") " +
+                "\(debugWorkspaceFocusSuffix()) deltaSinceScrollMs=\(String(format: "%.2f", deltaMs))"
+            )
             ghostty_surface_set_focus(surface, false)
         }
         return result
@@ -5083,7 +5145,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     private func requestPointerFocusRecovery() {
 #if DEBUG
-        dlog("focus.pointerDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
+        dlog(
+            "focus.pointerDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
+            "\(debugWorkspaceFocusSuffix())"
+        )
 #endif
         onFocus?()
     }
@@ -6824,6 +6889,53 @@ final class GhosttySurfaceScrollView: NSView {
         return String(describing: type(of: firstResponder))
     }
 
+    private func debugFirstResponderPanelLabel() -> String {
+        guard let window else { return "nil" }
+        return cmuxOwningGhosttyView(for: window.firstResponder)?
+            .terminalSurface?
+            .id
+            .uuidString
+            .prefix(5)
+            .description ?? "nil"
+    }
+
+    private func debugWorkspaceFocusSuffix() -> String {
+        let workspaceId = surfaceView.terminalSurface?.tabId ?? surfaceView.tabId
+        let workspaceShort = workspaceId.map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let firstResponderPanel = debugFirstResponderPanelLabel()
+        guard let workspaceId,
+              let appDelegate = AppDelegate.shared else {
+            return
+                "workspace=\(workspaceShort) pane=nil focusedPane=nil selectedPanel=nil " +
+                "focusedPanel=nil firstResponderPanel=\(firstResponderPanel)"
+        }
+
+        let manager = appDelegate.tabManagerFor(tabId: workspaceId) ?? appDelegate.tabManager
+        guard let workspace = manager?.tabs.first(where: { $0.id == workspaceId }) else {
+            return
+                "workspace=\(workspaceShort) pane=nil focusedPane=nil selectedPanel=nil " +
+                "focusedPanel=nil firstResponderPanel=\(firstResponderPanel)"
+        }
+
+        let panelId = surfaceView.terminalSurface?.id
+        let paneId = panelId.flatMap { workspace.paneId(forPanelId: $0) }
+        let paneShort = paneId.map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let focusedPaneShort = workspace.bonsplitController.focusedPaneId
+            .map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let selectedTab = workspace.bonsplitController.focusedPaneId
+            .flatMap { workspace.bonsplitController.selectedTab(inPane: $0) }
+        let selectedPanelShort = selectedTab
+            .flatMap { workspace.panelIdFromSurfaceId($0.id) }
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let focusedPanelShort = workspace.focusedPanelId
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+
+        return
+            "workspace=\(workspaceShort) pane=\(paneShort) focusedPane=\(focusedPaneShort) " +
+            "selectedPanel=\(selectedPanelShort) focusedPanel=\(focusedPanelShort) " +
+            "firstResponderPanel=\(firstResponderPanel)"
+    }
+
     private func debugVisibilityStateSuffix(transition: String) -> String {
         let surface = surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil"
         let hiddenInHierarchy = (isHiddenOrHasHiddenAncestor || surfaceView.isHiddenOrHasHiddenAncestor) ? 1 : 0
@@ -6838,7 +6950,7 @@ final class GhosttySurfaceScrollView: NSView {
             "surface=\(surface) transition=\(transition) active=\(isActive ? 1 : 0) " +
             "visibleFlag=\(surfaceView.isVisibleInUI ? 1 : 0) hostHidden=\(hostHidden) surfaceHidden=\(surfaceHidden) " +
             "hiddenHierarchy=\(hiddenInHierarchy) inWindow=\(inWindow) hasSuperview=\(hasSuperview) " +
-            "bounds=\(boundsText) frame=\(frameText) firstResponder=\(responder)"
+            "bounds=\(boundsText) frame=\(frameText) firstResponder=\(responder) \(debugWorkspaceFocusSuffix())"
     }
 #endif
 
@@ -7083,7 +7195,7 @@ final class GhosttySurfaceScrollView: NSView {
             "focus.ensure.apply surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
             "tab=\(tabId.uuidString.prefix(5)) panel=\(surfaceId.uuidString.prefix(5)) " +
             "result=\(result ? 1 : 0) firstResponder=\(String(describing: window.firstResponder)) " +
-            "attempts=\(attemptsRemaining)"
+            "attempts=\(attemptsRemaining) \(debugWorkspaceFocusSuffix())"
         )
 #endif
 
@@ -7131,7 +7243,10 @@ final class GhosttySurfaceScrollView: NSView {
     private func reassertTerminalSurfaceFocus(reason: String) {
         guard let terminalSurface = surfaceView.terminalSurface else { return }
 #if DEBUG
-        dlog("focus.surface.reassert surface=\(terminalSurface.id.uuidString.prefix(5)) reason=\(reason)")
+        dlog(
+            "focus.surface.reassert surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+            "reason=\(reason) \(debugWorkspaceFocusSuffix())"
+        )
 #endif
         terminalSurface.setFocus(true)
         refreshSurfaceAfterFocusIfNeeded(reason: reason)
@@ -7150,7 +7265,10 @@ final class GhosttySurfaceScrollView: NSView {
         }
         lastFocusRefreshAt = now
 #if DEBUG
-        dlog("focus.surface.refresh surface=\(terminalSurface.id.uuidString.prefix(5)) reason=\(reason)")
+        dlog(
+            "focus.surface.refresh surface=\(terminalSurface.id.uuidString.prefix(5)) " +
+            "reason=\(reason) \(debugWorkspaceFocusSuffix())"
+        )
 #endif
         terminalSurface.forceRefresh(reason: "focus.surface.\(reason)")
     }
@@ -7169,7 +7287,8 @@ final class GhosttySurfaceScrollView: NSView {
 #if DEBUG
             dlog(
                 "focus.apply.skip surface=\(surfaceShort) " +
-                "reason=hidden_or_tiny hidden=\(isHiddenForFocus ? 1 : 0) frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height))"
+                "reason=hidden_or_tiny hidden=\(isHiddenForFocus ? 1 : 0) " +
+                "frame=\(String(format: "%.1fx%.1f", bounds.width, bounds.height)) \(debugWorkspaceFocusSuffix())"
             )
 #endif
             return
@@ -7179,7 +7298,10 @@ final class GhosttySurfaceScrollView: NSView {
               let panelId = surfaceView.terminalSurface?.id,
               matchesCurrentTerminalFocusTarget(tabId: tabId, surfaceId: panelId) else {
 #if DEBUG
-            dlog("focus.apply.skip surface=\(surfaceShort) reason=stale_target")
+            dlog(
+                "focus.apply.skip surface=\(surfaceShort) " +
+                "reason=stale_target \(debugWorkspaceFocusSuffix())"
+            )
 #endif
             return
         }
@@ -7376,7 +7498,8 @@ final class GhosttySurfaceScrollView: NSView {
 #if DEBUG
         dlog(
             "focus.surface.resign surface=\(surfaceView.terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +
-            "reason=\(reason) firstResponder=\(String(describing: firstResponder))"
+            "reason=\(reason) firstResponder=\(String(describing: firstResponder)) " +
+            "\(debugWorkspaceFocusSuffix())"
         )
 #endif
         window.makeFirstResponder(nil)

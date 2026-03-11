@@ -3134,6 +3134,33 @@ final class Workspace: Identifiable, ObservableObject {
         terminalPanel.hostedView.ensureFocus(for: id, surfaceId: preferredPanelId)
     }
 
+#if DEBUG
+    private func debugFocusStateSummary(targetPanelId: UUID? = nil) -> String {
+        let targetPanelShort = targetPanelId.map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let targetPaneShort = targetPanelId
+            .flatMap { paneId(forPanelId: $0) }
+            .map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let focusedPaneShort = bonsplitController.focusedPaneId
+            .map { String($0.id.uuidString.prefix(5)) } ?? "nil"
+        let selectedTabShort = bonsplitController.focusedPaneId
+            .flatMap { bonsplitController.selectedTab(inPane: $0)?.id }
+            .map { String($0.uuid.uuidString.prefix(5)) } ?? "nil"
+        let selectedPanelShort = bonsplitController.focusedPaneId
+            .flatMap { bonsplitController.selectedTab(inPane: $0) }
+            .flatMap { panelIdFromSurfaceId($0.id) }
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let focusedPanelShort = focusedPanelId
+            .map { String($0.uuidString.prefix(5)) } ?? "nil"
+        let firstResponderPanelShort = cmuxOwningGhosttyView(
+            for: NSApp.keyWindow?.firstResponder ?? NSApp.mainWindow?.firstResponder
+        )?.terminalSurface?.id.uuidString.prefix(5).description ?? "nil"
+        return
+            "workspace=\(id.uuidString.prefix(5)) targetPanel=\(targetPanelShort) targetPane=\(targetPaneShort) " +
+            "focusedPane=\(focusedPaneShort) selectedTab=\(selectedTabShort) selectedPanel=\(selectedPanelShort) " +
+            "focusedPanel=\(focusedPanelShort) firstResponderPanel=\(firstResponderPanelShort)"
+    }
+#endif
+
     func focusPanel(
         _ panelId: UUID,
         previousHostedView: GhosttySurfaceScrollView? = nil,
@@ -3145,7 +3172,7 @@ final class Workspace: Identifiable, ObservableObject {
         let triggerLabel = trigger == .terminalFirstResponder ? "firstResponder" : "standard"
         dlog("focus.panel panel=\(panelId.uuidString.prefix(5)) pane=\(pane) trigger=\(triggerLabel)")
         FocusLogStore.shared.append(
-            "Workspace.focusPanel panelId=\(panelId.uuidString) focusedPane=\(pane) trigger=\(triggerLabel)"
+            "Workspace.focusPanel trigger=\(triggerLabel) \(debugFocusStateSummary(targetPanelId: panelId))"
         )
 #endif
         guard let tabId = surfaceIdFromPanelId(panelId) else { return }
@@ -4297,6 +4324,11 @@ extension Workspace: BonsplitDelegate {
             "focusedPane=\(focusedPaneBefore) selectedTab=\(selectedTabBefore) " +
             "reassert=\(reassertAppKitFocus ? 1 : 0)"
         )
+        FocusLogStore.shared.append(
+            "Workspace.applyTabSelection.begin pane=\(pane.id.uuidString) " +
+            "tabId=\(tabId.uuid.uuidString) reassert=\(reassertAppKitFocus ? 1 : 0) " +
+            "\(debugFocusStateSummary())"
+        )
 #endif
         if bonsplitController.allPaneIds.contains(pane) {
             if bonsplitController.focusedPaneId != pane {
@@ -4453,6 +4485,11 @@ extension Workspace: BonsplitDelegate {
             "panel=\(panelId.uuidString.prefix(5)) type=\(String(describing: type(of: panel))) " +
             "focusedPane=\(focusedPane.id.uuidString.prefix(5)) selectedTab=\(selectedTabId.uuid.uuidString.prefix(5)) " +
             "prevPanel=\(prevPanelShort)"
+        )
+        FocusLogStore.shared.append(
+            "Workspace.applyTabSelection.end panelId=\(panelId.uuidString) " +
+            "type=\(String(describing: type(of: panel))) prevPanel=\(previousFocusedPanelId?.uuidString ?? "nil") " +
+            "\(debugFocusStateSummary(targetPanelId: panelId))"
         )
 #endif
     }
