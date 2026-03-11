@@ -9169,6 +9169,22 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         }
     }
 
+    private final class ReattachProbeWebView: WKWebView {
+        private(set) var firedSelectors: [String] = []
+
+        @objc func viewDidUnhide() {
+            firedSelectors.append("viewDidUnhide")
+        }
+
+        @objc func _enterInWindow() {
+            firedSelectors.append("_enterInWindow")
+        }
+
+        @objc func _endDeferringViewInWindowChangesSync() {
+            firedSelectors.append("_endDeferringViewInWindowChangesSync")
+        }
+    }
+
     private func makeMouseEvent(type: NSEvent.EventType, location: NSPoint, window: NSWindow) -> NSEvent {
         guard let event = NSEvent.mouseEvent(
             with: type,
@@ -9184,6 +9200,14 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
             fatalError("Failed to create \(type) mouse event")
         }
         return event
+    }
+
+    private func realizeWindowLayout(_ window: NSWindow) {
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        window.contentView?.layoutSubtreeIfNeeded()
     }
 
     func testBrowserPanelHostPrefersNativeHostedInspectorSiblingDividerHit() {
@@ -9466,6 +9490,49 @@ final class BrowserPanelHostContainerViewTests: XCTestCase {
         XCTAssertTrue(webView.translatesAutoresizingMaskIntoConstraints)
         XCTAssertEqual(webView.autoresizingMask, [.width, .height])
         XCTAssertEqual(webView.frame, slot.bounds)
+    }
+
+    func testLocalInlineHostedRefreshReattachesRenderingStateAcrossAsyncPasses() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let slot = WindowBrowserSlotView(frame: NSRect(x: 40, y: 24, width: 240, height: 180))
+        contentView.addSubview(slot)
+
+        let webView = ReattachProbeWebView(
+            frame: slot.bounds,
+            configuration: WKWebViewConfiguration()
+        )
+        slot.addSubview(webView)
+        slot.pinHostedWebView(webView)
+        contentView.layoutSubtreeIfNeeded()
+        slot.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+
+        WebViewRepresentable.refreshLocalInlineHostedWebViewPresentation(
+            webView,
+            in: slot,
+            reason: "test"
+        )
+
+        XCTAssertEqual(
+            webView.firedSelectors,
+            ["viewDidUnhide", "_enterInWindow", "_endDeferringViewInWindowChangesSync"]
+        )
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+
+        XCTAssertEqual(webView.firedSelectors.count, 9)
     }
 
     func testWindowBrowserSlotReattachesPlainWebViewAtFullBoundsAfterHiddenHostResize() {

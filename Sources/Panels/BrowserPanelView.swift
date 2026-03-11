@@ -3,6 +3,54 @@ import SwiftUI
 import WebKit
 import AppKit
 
+private extension NSObject {
+    @discardableResult
+    func cmuxLocalHostCallVoidIfAvailable(_ rawSelector: String) -> Bool {
+        let selector = NSSelectorFromString(rawSelector)
+        guard responds(to: selector) else { return false }
+        typealias Fn = @convention(c) (AnyObject, Selector) -> Void
+        let fn = unsafeBitCast(method(for: selector), to: Fn.self)
+        fn(self, selector)
+        return true
+    }
+}
+
+private extension WKWebView {
+    func cmuxReattachLocalHostRenderingState(reason: String) {
+        guard window != nil else { return }
+
+        let firedSelectors = [
+            "viewDidUnhide",
+            "_enterInWindow",
+            "_endDeferringViewInWindowChangesSync",
+        ].filter {
+            cmuxLocalHostCallVoidIfAvailable($0)
+        }
+
+        if let scrollView = enclosingScrollView {
+            scrollView.needsLayout = true
+            scrollView.needsDisplay = true
+            scrollView.setNeedsDisplay(scrollView.bounds)
+            scrollView.contentView.needsLayout = true
+            scrollView.contentView.needsDisplay = true
+        }
+
+        needsLayout = true
+        needsDisplay = true
+        setNeedsDisplay(bounds)
+
+#if DEBUG
+        if !firedSelectors.isEmpty {
+            dlog(
+                "browser.localHost.webview.reattach web=\(ObjectIdentifier(self)) " +
+                "reason=\(reason) selectors=\(firedSelectors.joined(separator: ",")) " +
+                "frame=\(NSStringFromRect(frame))"
+            )
+        }
+#endif
+    }
+}
+
 enum BrowserDevToolsIconOption: String, CaseIterable, Identifiable {
     case wrenchAndScrewdriver = "wrench.and.screwdriver"
     case wrenchAndScrewdriverFill = "wrench.and.screwdriver.fill"
@@ -4439,6 +4487,71 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
     }
 
+    private static func runLocalInlineHostedWebViewRefreshPass(
+        _ webView: WKWebView,
+        in container: WindowBrowserSlotView,
+        reason: String,
+        phase: String
+    ) {
+        guard !container.isHidden else { return }
+
+        webView.needsLayout = true
+        webView.needsDisplay = true
+        webView.setNeedsDisplay(webView.bounds)
+
+        container.layoutSubtreeIfNeeded()
+        if let scrollView = webView.enclosingScrollView {
+            scrollView.layoutSubtreeIfNeeded()
+            scrollView.contentView.layoutSubtreeIfNeeded()
+            scrollView.displayIfNeeded()
+        }
+        webView.layoutSubtreeIfNeeded()
+        webView.cmuxReattachLocalHostRenderingState(reason: "\(reason):\(phase)")
+        container.displayIfNeeded()
+        webView.displayIfNeeded()
+        (webView.window ?? container.window)?.displayIfNeeded()
+#if DEBUG
+        dlog(
+            "browser.localHost.refresh web=\(ObjectIdentifier(webView)) " +
+            "container=\(Self.objectID(container)) reason=\(reason) phase=\(phase) " +
+            "frame=\(Self.rectDescription(container.frame))"
+        )
+#endif
+    }
+
+    static func refreshLocalInlineHostedWebViewPresentation(
+        _ webView: WKWebView,
+        in container: WindowBrowserSlotView,
+        reason: String
+    ) {
+        guard !container.isHidden else { return }
+
+        Self.runLocalInlineHostedWebViewRefreshPass(
+            webView,
+            in: container,
+            reason: reason,
+            phase: "immediate"
+        )
+        DispatchQueue.main.async { [weak webView, weak container] in
+            guard let webView, let container else { return }
+            Self.runLocalInlineHostedWebViewRefreshPass(
+                webView,
+                in: container,
+                reason: reason,
+                phase: "async"
+            )
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak webView, weak container] in
+            guard let webView, let container else { return }
+            Self.runLocalInlineHostedWebViewRefreshPass(
+                webView,
+                in: container,
+                reason: reason,
+                phase: "delayed"
+            )
+        }
+    }
+
     private static func installPortalAnchorView(_ anchorView: NSView, in host: NSView) {
         // SwiftUI can keep transient replacement hosts alive off-window during split
         // reparenting. Never let those hosts steal the shared portal anchor, or the
@@ -4514,6 +4627,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             return false
         }
 
+        let didReparentIntoLocalHost = webView.superview !== slotView
         if webView.superview !== slotView {
             if let sourceSuperview = webView.superview {
                 Self.moveWebKitRelatedSubviewsIntoHostIfNeeded(
@@ -4538,6 +4652,13 @@ struct WebViewRepresentable: NSViewRepresentable {
         host.displayIfNeeded()
         slotView.displayIfNeeded()
         webView.displayIfNeeded()
+        if didReparentIntoLocalHost {
+            Self.refreshLocalInlineHostedWebViewPresentation(
+                webView,
+                in: slotView,
+                reason: "localHost.attach"
+            )
+        }
 
 #if DEBUG
         Self.logDevToolsState(
