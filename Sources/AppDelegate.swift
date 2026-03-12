@@ -10817,9 +10817,15 @@ private extension NSWindow {
             return "browser=\((responderWebView != nil || hitWebView != nil) ? 1 : 0) firstResponder=\(firstResponderType)"
         }()
         if event.type == .keyDown {
-            AppDelegate.shared?.recordTypingActivity()
             CmuxTypingTiming.logEventDelay(path: "window.sendEvent", event: event)
         }
+#endif
+        // recordTypingActivity must run in all builds so runSessionAutosaveTick
+        // can honor the typing quiet period in release.
+        if event.type == .keyDown {
+            AppDelegate.shared?.recordTypingActivity()
+        }
+#if DEBUG
         defer {
             if event.type == .keyDown {
                 let totalMs = (ProcessInfo.processInfo.systemUptime - phaseTotalStart) * 1000.0
