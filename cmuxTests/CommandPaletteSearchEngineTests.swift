@@ -467,14 +467,18 @@ final class CommandPaletteSearchEngineTests: XCTestCase {
         )
     }
 
-    func testCommandPaletteEmptyListViewportUsesCompactHeight() {
+    func testCommandPaletteListViewportUsesCompactRenderedRowHeight() {
         XCTAssertEqual(
             ContentView.commandPaletteListViewportHeight(resultCount: 0),
             30
         )
         XCTAssertEqual(
             ContentView.commandPaletteListViewportHeight(resultCount: 1),
-            24
+            20
+        )
+        XCTAssertEqual(
+            ContentView.commandPaletteListViewportHeight(resultCount: 17),
+            340
         )
     }
 
