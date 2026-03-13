@@ -8037,6 +8037,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
         var onGeometryChanged: (() -> Void)?
         private(set) var geometryRevision: UInt64 = 0
         private var lastReportedGeometryState: GeometryState?
+        private var geometryChangedWorkItem: DispatchWorkItem?
 
         private struct GeometryState: Equatable {
             let frame: CGRect
@@ -8059,7 +8060,18 @@ struct GhosttyTerminalView: NSViewRepresentable {
             guard state != lastReportedGeometryState else { return }
             lastReportedGeometryState = state
             geometryRevision &+= 1
-            onGeometryChanged?()
+            geometryChangedWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.geometryChangedWorkItem = nil
+                self.onGeometryChanged?()
+            }
+            geometryChangedWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        deinit {
+            geometryChangedWorkItem?.cancel()
         }
 
         override func viewDidMoveToWindow() {
@@ -8099,6 +8111,8 @@ struct GhosttyTerminalView: NSViewRepresentable {
         var lastBoundHostId: ObjectIdentifier?
         var lastPaneDropZone: DropZone?
         var lastSynchronizedHostGeometryRevision: UInt64 = 0
+        var pendingGeometrySyncRevision: UInt64 = 0
+        var pendingGeometrySyncWorkItem: DispatchWorkItem?
         weak var hostedView: GhosttySurfaceScrollView?
     }
 
@@ -8217,40 +8231,27 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.attachGeneration += 1
         let generation = coordinator.attachGeneration
 
-        if let host = hostContainer {
-            host.onDidMoveToWindow = { [weak host, weak hostedView, weak coordinator] in
+        func scheduleGeometrySynchronize(
+            host: HostContainerView,
+            hostedView: GhosttySurfaceScrollView,
+            coordinator: Coordinator
+        ) {
+            let targetRevision = host.geometryRevision
+            guard coordinator.lastSynchronizedHostGeometryRevision != targetRevision else { return }
+            coordinator.pendingGeometrySyncWorkItem?.cancel()
+            coordinator.pendingGeometrySyncRevision = targetRevision
+            let workItem = DispatchWorkItem { [weak host, weak hostedView, weak coordinator] in
                 guard let host, let hostedView, let coordinator else { return }
+                coordinator.pendingGeometrySyncWorkItem = nil
                 guard coordinator.attachGeneration == generation else { return }
+                guard coordinator.pendingGeometrySyncRevision == targetRevision else { return }
                 guard terminalSurface.claimPortalHost(
                     hostId: ObjectIdentifier(host),
                     inWindow: host.window != nil,
                     bounds: host.bounds,
-                    reason: "didMoveToWindow"
+                    reason: "geometryChanged.async"
                 ) else { return }
-                guard host.window != nil else { return }
-                TerminalWindowPortalRegistry.bind(
-                    hostedView: hostedView,
-                    to: host,
-                    visibleInUI: coordinator.desiredIsVisibleInUI,
-                    zPriority: coordinator.desiredPortalZPriority,
-                    expectedSurfaceId: portalExpectedSurfaceId,
-                    expectedGeneration: portalExpectedGeneration
-                )
-                coordinator.lastBoundHostId = ObjectIdentifier(host)
-                coordinator.lastSynchronizedHostGeometryRevision = host.geometryRevision
-                hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
-                hostedView.setActive(coordinator.desiredIsActive)
-                hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
-            }
-            host.onGeometryChanged = { [weak host, weak hostedView, weak coordinator] in
-                guard let host, let hostedView, let coordinator else { return }
-                guard coordinator.attachGeneration == generation else { return }
-                guard terminalSurface.claimPortalHost(
-                    hostId: ObjectIdentifier(host),
-                    inWindow: host.window != nil,
-                    bounds: host.bounds,
-                    reason: "geometryChanged"
-                ) else { return }
+
                 let hostId = ObjectIdentifier(host)
                 if host.window != nil,
                    (coordinator.lastBoundHostId != hostId ||
@@ -8275,8 +8276,46 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     hostedView.setActive(coordinator.desiredIsActive)
                     hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
                 }
+                guard host.window != nil else { return }
                 TerminalWindowPortalRegistry.synchronizeForAnchor(host)
+                coordinator.lastSynchronizedHostGeometryRevision = targetRevision
+            }
+            coordinator.pendingGeometrySyncWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
+        if let host = hostContainer {
+            host.onDidMoveToWindow = { [weak host, weak hostedView, weak coordinator] in
+                guard let host, let hostedView, let coordinator else { return }
+                guard coordinator.attachGeneration == generation else { return }
+                guard terminalSurface.claimPortalHost(
+                    hostId: ObjectIdentifier(host),
+                    inWindow: host.window != nil,
+                    bounds: host.bounds,
+                    reason: "didMoveToWindow"
+                ) else { return }
+                guard host.window != nil else { return }
+                TerminalWindowPortalRegistry.bind(
+                    hostedView: hostedView,
+                    to: host,
+                    visibleInUI: coordinator.desiredIsVisibleInUI,
+                    zPriority: coordinator.desiredPortalZPriority,
+                    expectedSurfaceId: portalExpectedSurfaceId,
+                    expectedGeneration: portalExpectedGeneration
+                )
+                coordinator.lastBoundHostId = ObjectIdentifier(host)
                 coordinator.lastSynchronizedHostGeometryRevision = host.geometryRevision
+                coordinator.pendingGeometrySyncWorkItem?.cancel()
+                coordinator.pendingGeometrySyncWorkItem = nil
+                coordinator.pendingGeometrySyncRevision = host.geometryRevision
+                hostedView.setVisibleInUI(coordinator.desiredIsVisibleInUI)
+                hostedView.setActive(coordinator.desiredIsActive)
+                hostedView.setNotificationRing(visible: coordinator.desiredShowsUnreadNotificationRing)
+            }
+            host.onGeometryChanged = { [weak host, weak hostedView, weak coordinator] in
+                guard let host, let hostedView, let coordinator else { return }
+                guard coordinator.attachGeneration == generation else { return }
+                scheduleGeometrySynchronize(host: host, hostedView: hostedView, coordinator: coordinator)
             }
 
             if host.window != nil, hostOwnsPortalNow {
@@ -8310,9 +8349,11 @@ struct GhosttyTerminalView: NSViewRepresentable {
                     )
                     coordinator.lastBoundHostId = hostId
                     coordinator.lastSynchronizedHostGeometryRevision = geometryRevision
+                    coordinator.pendingGeometrySyncWorkItem?.cancel()
+                    coordinator.pendingGeometrySyncWorkItem = nil
+                    coordinator.pendingGeometrySyncRevision = geometryRevision
                 } else if coordinator.lastSynchronizedHostGeometryRevision != geometryRevision {
-                    TerminalWindowPortalRegistry.synchronizeForAnchor(host)
-                    coordinator.lastSynchronizedHostGeometryRevision = geometryRevision
+                    scheduleGeometrySynchronize(host: host, hostedView: hostedView, coordinator: coordinator)
                 }
             } else if hostOwnsPortalNow {
                 // Bind is deferred until host moves into a window. Update the
@@ -8371,6 +8412,9 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
         coordinator.lastBoundHostId = nil
+        coordinator.pendingGeometrySyncWorkItem?.cancel()
+        coordinator.pendingGeometrySyncWorkItem = nil
+        coordinator.pendingGeometrySyncRevision = 0
         let hostedView = coordinator.hostedView
 #if DEBUG
         if let hostedView {

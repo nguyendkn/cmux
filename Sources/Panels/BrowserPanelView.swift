@@ -3711,6 +3711,8 @@ struct WebViewRepresentable: NSViewRepresentable {
         var desiredPortalZPriority: Int = 0
         var lastPortalHostId: ObjectIdentifier?
         var lastSynchronizedHostGeometryRevision: UInt64 = 0
+        var pendingGeometrySyncRevision: UInt64 = 0
+        var pendingGeometrySyncWorkItem: DispatchWorkItem?
     }
 
     final class HostContainerView: NSView {
@@ -3739,6 +3741,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         var onGeometryChanged: (() -> Void)?
         private(set) var geometryRevision: UInt64 = 0
         private var lastReportedGeometryState: GeometryState?
+        private var geometryChangedWorkItem: DispatchWorkItem?
         private weak var hostedWebView: WKWebView?
         private var hostedWebViewConstraints: [NSLayoutConstraint] = []
         private weak var localInlineSlotView: WindowBrowserSlotView?
@@ -3803,6 +3806,7 @@ struct WebViewRepresentable: NSViewRepresentable {
 #endif
 
         deinit {
+            geometryChangedWorkItem?.cancel()
             hostedInspectorReapplyWorkItem?.cancel()
             hostedInspectorDockConfigurationSyncWorkItem?.cancel()
             if let trackingArea {
@@ -4078,7 +4082,14 @@ struct WebViewRepresentable: NSViewRepresentable {
             guard state != lastReportedGeometryState else { return }
             lastReportedGeometryState = state
             geometryRevision &+= 1
-            onGeometryChanged?()
+            geometryChangedWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.geometryChangedWorkItem = nil
+                self.onGeometryChanged?()
+            }
+            geometryChangedWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
         }
 
         func ensureLocalInlineSlotView() -> WindowBrowserSlotView {
@@ -5477,6 +5488,56 @@ struct WebViewRepresentable: NSViewRepresentable {
             Self.installPortalAnchorView(portalAnchorView, in: host)
         }
 
+        func schedulePortalSynchronize(
+            host: HostContainerView,
+            webView: WKWebView,
+            coordinator: Coordinator,
+            portalAnchorView: NSView,
+            browserPanel: BrowserPanel
+        ) {
+            let targetRevision = host.geometryRevision
+            guard coordinator.lastSynchronizedHostGeometryRevision != targetRevision else { return }
+            coordinator.pendingGeometrySyncWorkItem?.cancel()
+            coordinator.pendingGeometrySyncRevision = targetRevision
+            let workItem = DispatchWorkItem {
+                coordinator.pendingGeometrySyncWorkItem = nil
+                guard coordinator.attachGeneration == generation else { return }
+                guard coordinator.pendingGeometrySyncRevision == targetRevision else { return }
+                guard currentPaneDropContext()?.paneId.id == paneId.id else { return }
+                guard browserPanel.claimPortalHost(
+                    hostId: ObjectIdentifier(host),
+                    paneId: paneId,
+                    inWindow: host.window != nil,
+                    bounds: host.bounds,
+                    reason: "geometryChanged.async"
+                ) else { return }
+                guard host.window != nil else { return }
+
+                let hostId = ObjectIdentifier(host)
+                Self.installPortalAnchorView(portalAnchorView, in: host)
+                if coordinator.lastPortalHostId != hostId ||
+                   !BrowserWindowPortalRegistry.isWebView(webView, boundTo: portalAnchorView) {
+                    BrowserWindowPortalRegistry.bind(
+                        webView: webView,
+                        to: portalAnchorView,
+                        visibleInUI: coordinator.desiredPortalVisibleInUI,
+                        zPriority: coordinator.desiredPortalZPriority
+                    )
+                    BrowserWindowPortalRegistry.updatePaneTopChromeHeight(
+                        for: webView,
+                        height: coordinator.desiredPortalVisibleInUI ? paneTopChromeHeight : 0
+                    )
+                    BrowserWindowPortalRegistry.updatePaneDropContext(for: webView, context: activePaneDropContext)
+                    BrowserWindowPortalRegistry.updateSearchOverlay(for: webView, configuration: activeSearchOverlay)
+                    coordinator.lastPortalHostId = hostId
+                }
+                BrowserWindowPortalRegistry.synchronizeForAnchor(portalAnchorView)
+                coordinator.lastSynchronizedHostGeometryRevision = targetRevision
+            }
+            coordinator.pendingGeometrySyncWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
+
         host.onDidMoveToWindow = { [weak host, weak webView, weak coordinator, weak portalAnchorView, weak browserPanel = panel] in
             guard let host, let webView, let coordinator, let portalAnchorView, let browserPanel else { return }
             guard coordinator.attachGeneration == generation else { return }
@@ -5504,39 +5565,20 @@ struct WebViewRepresentable: NSViewRepresentable {
             BrowserWindowPortalRegistry.updateSearchOverlay(for: webView, configuration: activeSearchOverlay)
             coordinator.lastPortalHostId = ObjectIdentifier(host)
             coordinator.lastSynchronizedHostGeometryRevision = host.geometryRevision
+            coordinator.pendingGeometrySyncWorkItem?.cancel()
+            coordinator.pendingGeometrySyncWorkItem = nil
+            coordinator.pendingGeometrySyncRevision = host.geometryRevision
         }
         host.onGeometryChanged = { [weak host, weak webView, weak coordinator, weak portalAnchorView, weak browserPanel = panel] in
             guard let host, let webView, let coordinator, let portalAnchorView, let browserPanel else { return }
             guard coordinator.attachGeneration == generation else { return }
-            guard currentPaneDropContext()?.paneId.id == paneId.id else { return }
-            guard browserPanel.claimPortalHost(
-                hostId: ObjectIdentifier(host),
-                paneId: paneId,
-                inWindow: host.window != nil,
-                bounds: host.bounds,
-                reason: "geometryChanged"
-            ) else { return }
-            guard host.window != nil else { return }
-            let hostId = ObjectIdentifier(host)
-            Self.installPortalAnchorView(portalAnchorView, in: host)
-            if coordinator.lastPortalHostId != hostId ||
-               !BrowserWindowPortalRegistry.isWebView(webView, boundTo: portalAnchorView) {
-                BrowserWindowPortalRegistry.bind(
-                    webView: webView,
-                    to: portalAnchorView,
-                    visibleInUI: coordinator.desiredPortalVisibleInUI,
-                    zPriority: coordinator.desiredPortalZPriority
-                )
-                BrowserWindowPortalRegistry.updatePaneTopChromeHeight(
-                    for: webView,
-                    height: coordinator.desiredPortalVisibleInUI ? paneTopChromeHeight : 0
-                )
-                BrowserWindowPortalRegistry.updatePaneDropContext(for: webView, context: activePaneDropContext)
-                BrowserWindowPortalRegistry.updateSearchOverlay(for: webView, configuration: activeSearchOverlay)
-                coordinator.lastPortalHostId = hostId
-            }
-            BrowserWindowPortalRegistry.synchronizeForAnchor(portalAnchorView)
-            coordinator.lastSynchronizedHostGeometryRevision = host.geometryRevision
+            schedulePortalSynchronize(
+                host: host,
+                webView: webView,
+                coordinator: coordinator,
+                portalAnchorView: portalAnchorView,
+                browserPanel: browserPanel
+            )
         }
 
         if !shouldAttachWebView {
@@ -5566,6 +5608,9 @@ struct WebViewRepresentable: NSViewRepresentable {
                 )
                 coordinator.lastPortalHostId = hostId
                 coordinator.lastSynchronizedHostGeometryRevision = geometryRevision
+                coordinator.pendingGeometrySyncWorkItem?.cancel()
+                coordinator.pendingGeometrySyncWorkItem = nil
+                coordinator.pendingGeometrySyncRevision = geometryRevision
             }
             BrowserWindowPortalRegistry.updatePaneTopChromeHeight(
                 for: webView,
@@ -5574,8 +5619,13 @@ struct WebViewRepresentable: NSViewRepresentable {
             BrowserWindowPortalRegistry.updateSearchOverlay(for: webView, configuration: activeSearchOverlay)
             if !shouldBindNow,
                coordinator.lastSynchronizedHostGeometryRevision != geometryRevision {
-                BrowserWindowPortalRegistry.synchronizeForAnchor(portalAnchorView)
-                coordinator.lastSynchronizedHostGeometryRevision = geometryRevision
+                schedulePortalSynchronize(
+                    host: host,
+                    webView: webView,
+                    coordinator: coordinator,
+                    portalAnchorView: portalAnchorView,
+                    browserPanel: panel
+                )
             }
         } else if portalHostAccepted {
             // Bind is deferred until host moves into a window. Keep the current
@@ -5735,6 +5785,9 @@ struct WebViewRepresentable: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
         coordinator.attachGeneration += 1
+        coordinator.pendingGeometrySyncWorkItem?.cancel()
+        coordinator.pendingGeometrySyncWorkItem = nil
+        coordinator.pendingGeometrySyncRevision = 0
         clearPortalCallbacks(for: nsView)
         if let panel = coordinator.panel, let host = nsView as? HostContainerView {
             panel.releasePortalHostIfOwned(
