@@ -5969,6 +5969,27 @@ final class WorkspaceSplitWorkingDirectoryTests: XCTestCase {
         )
     }
 
+    func testNewTerminalSplitFallsBackToRequestedSourceWorkingDirectoryWhenReportIsUnavailable() {
+        let workspace = Workspace(workingDirectory: "/repo/requested")
+        guard let sourcePanelId = workspace.focusedPanelId else {
+            XCTFail("Expected focused terminal panel")
+            return
+        }
+
+        workspace.currentDirectory = "/repo/fallback"
+
+        guard let splitPanel = workspace.newTerminalSplit(from: sourcePanelId, orientation: .horizontal) else {
+            XCTFail("Expected split panel to be created")
+            return
+        }
+
+        XCTAssertEqual(
+            splitPanel.requestedWorkingDirectory,
+            "/repo/requested",
+            "Expected splits to inherit the source terminal requested cwd before shell integration reports it"
+        )
+    }
+
     func testBonsplitAutoCreatedSplitPrefersSourcePanelDirectoryOverWorkspaceFallback() {
         let workspace = Workspace()
         guard let sourcePanelId = workspace.focusedPanelId,
@@ -5992,6 +6013,31 @@ final class WorkspaceSplitWorkingDirectoryTests: XCTestCase {
             newPanel.requestedWorkingDirectory,
             "/repo/source",
             "Expected Bonsplit-created split terminals to inherit the source terminal working directory"
+        )
+    }
+
+    func testBonsplitAutoCreatedSplitFallsBackToRequestedSourceWorkingDirectoryWhenReportIsUnavailable() {
+        let workspace = Workspace(workingDirectory: "/repo/requested")
+        guard let sourcePanelId = workspace.focusedPanelId,
+              let sourcePaneId = workspace.paneId(forPanelId: sourcePanelId) else {
+            XCTFail("Expected focused terminal pane")
+            return
+        }
+
+        workspace.currentDirectory = "/repo/fallback"
+
+        guard let newPaneId = workspace.bonsplitController.splitPane(sourcePaneId, orientation: .horizontal),
+              let newTabId = workspace.bonsplitController.selectedTab(inPane: newPaneId)?.id,
+              let newPanelId = workspace.panelIdFromSurfaceId(newTabId),
+              let newPanel = workspace.terminalPanel(for: newPanelId) else {
+            XCTFail("Expected Bonsplit split to auto-create a terminal panel")
+            return
+        }
+
+        XCTAssertEqual(
+            newPanel.requestedWorkingDirectory,
+            "/repo/requested",
+            "Expected Bonsplit-created split terminals to inherit the requested cwd before shell integration reports it"
         )
     }
 }
