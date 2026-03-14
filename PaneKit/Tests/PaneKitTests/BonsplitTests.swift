@@ -578,6 +578,78 @@ final class BonsplitTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(firstRightFrame.minX, secondRightFrame.maxX)
     }
 
+    @MainActor
+    func testPaperCanvasResizeShiftsNeighborChain() {
+        let controller = BonsplitController(
+            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+        )
+        controller.setContainerFrame(CGRect(x: 0, y: 0, width: 1000, height: 700))
+
+        guard let rootPane = controller.focusedPaneId,
+              let rightPane = controller.splitPane(rootPane, orientation: .horizontal),
+              let farRightPane = controller.splitPane(rightPane, orientation: .horizontal),
+              let rootFrameBefore = controller.paperCanvasLayout()?.panes.first(where: { $0.paneId == rootPane })?.frame,
+              let rightFrameBefore = controller.paperCanvasLayout()?.panes.first(where: { $0.paneId == rightPane })?.frame,
+              let farRightFrameBefore = controller.paperCanvasLayout()?.panes.first(where: { $0.paneId == farRightPane })?.frame else {
+            return XCTFail("Expected initial paper layout")
+        }
+
+        XCTAssertTrue(controller.resizePaperPane(rootPane, direction: .right, amount: 120))
+
+        guard let rootFrameAfter = controller.paperCanvasLayout()?.panes.first(where: { $0.paneId == rootPane })?.frame,
+              let rightFrameAfter = controller.paperCanvasLayout()?.panes.first(where: { $0.paneId == rightPane })?.frame,
+              let farRightFrameAfter = controller.paperCanvasLayout()?.panes.first(where: { $0.paneId == farRightPane })?.frame else {
+            return XCTFail("Expected resized paper layout")
+        }
+
+        XCTAssertEqual(rootFrameAfter.width, rootFrameBefore.width + 120, accuracy: 0.001)
+        XCTAssertEqual(rightFrameAfter.minX, rightFrameBefore.minX + 120, accuracy: 0.001)
+        XCTAssertEqual(farRightFrameAfter.minX, farRightFrameBefore.minX + 120, accuracy: 0.001)
+        XCTAssertEqual(controller.focusedPaneId, rootPane)
+    }
+
+    @MainActor
+    func testPaperCanvasApplyLayoutRestoresFramesAndViewport() {
+        let controller = BonsplitController(
+            configuration: BonsplitConfiguration(layoutStyle: .paperCanvas)
+        )
+        controller.setContainerFrame(CGRect(x: 0, y: 0, width: 900, height: 600))
+
+        guard let rootPane = controller.focusedPaneId,
+              let rightPane = controller.splitPane(rootPane, orientation: .horizontal) else {
+            return XCTFail("Expected initial paper layout")
+        }
+
+        let layout = PaperCanvasLayoutSnapshot(
+            panes: [
+                PaperCanvasPaneSnapshot(
+                    paneId: rootPane,
+                    frame: CGRect(x: 0, y: 0, width: 900, height: 600)
+                ),
+                PaperCanvasPaneSnapshot(
+                    paneId: rightPane,
+                    frame: CGRect(x: 980, y: 120, width: 900, height: 600)
+                )
+            ],
+            viewportOrigin: CGPoint(x: 820, y: 90),
+            focusedPaneId: rightPane
+        )
+
+        XCTAssertTrue(controller.applyPaperCanvasLayout(layout))
+
+        guard let restored = controller.paperCanvasLayout(),
+              let rootFrame = restored.panes.first(where: { $0.paneId == rootPane })?.frame,
+              let rightFrame = restored.panes.first(where: { $0.paneId == rightPane })?.frame else {
+            return XCTFail("Expected restored paper layout")
+        }
+
+        XCTAssertEqual(rootFrame.origin.x, 0, accuracy: 0.001)
+        XCTAssertEqual(rightFrame.origin.x, 980, accuracy: 0.001)
+        XCTAssertEqual(restored.viewportOrigin.x, 820, accuracy: 0.001)
+        XCTAssertEqual(restored.viewportOrigin.y, 90, accuracy: 0.001)
+        XCTAssertEqual(restored.focusedPaneId, rightPane)
+    }
+
     func testIconSaturationKeepsRasterFaviconInColorWhenInactive() {
         XCTAssertEqual(
             TabItemStyling.iconSaturation(hasRasterIcon: true, tabSaturation: 0.0),

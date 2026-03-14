@@ -37,6 +37,10 @@ public final class BonsplitController {
         }
     }
 
+    public var layoutStyle: PaneLayoutStyle {
+        configuration.layoutStyle
+    }
+
     /// When false, drop delegates reject all drags. Set to false for inactive workspaces
     /// so their views (kept alive in a ZStack for state preservation) don't intercept drags
     /// meant for the active workspace.
@@ -647,6 +651,51 @@ public final class BonsplitController {
             return nil
         }
         return Tab(from: selected)
+    }
+
+    public func paperCanvasLayout() -> PaperCanvasLayoutSnapshot? {
+        internalController.paperCanvasLayoutSnapshot()
+    }
+
+    @discardableResult
+    public func applyPaperCanvasLayout(
+        _ layout: PaperCanvasLayoutSnapshot,
+        notify: Bool = true
+    ) -> Bool {
+        let applied = internalController.applyPaperCanvasLayout(layout)
+        if applied, notify {
+            notifyGeometryChange()
+        }
+        return applied
+    }
+
+    @discardableResult
+    public func setPaperCanvasViewportOrigin(
+        _ origin: CGPoint,
+        notify: Bool = true
+    ) -> Bool {
+        let updated = internalController.setPaperCanvasViewportOrigin(origin)
+        if updated, notify {
+            notifyGeometryChange()
+        }
+        return updated
+    }
+
+    @discardableResult
+    public func resizePaperPane(
+        _ paneId: PaneID,
+        direction: NavigationDirection,
+        amount: CGFloat,
+        notify: Bool = true
+    ) -> Bool {
+        guard internalController.resizePaperPane(paneId, direction: direction, amount: amount) != nil else {
+            return false
+        }
+        internalController.focusPane(paneId)
+        if notify {
+            notifyGeometryChange()
+        }
+        return true
     }
 
     // MARK: - Geometry Query API

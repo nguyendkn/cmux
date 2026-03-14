@@ -106,8 +106,7 @@ private struct SessionPaneRestoreEntry {
 
 extension Workspace {
     func sessionSnapshot(includeScrollback: Bool) -> SessionWorkspaceSnapshot {
-        let tree = bonsplitController.treeSnapshot()
-        let layout = sessionLayoutSnapshot(from: tree)
+        let layout = sessionLayoutSnapshot()
 
         let orderedPanelIds = sidebarOrderedPanelIds()
         var seen: Set<UUID> = []
@@ -169,6 +168,9 @@ extension Workspace {
     func restoreSessionSnapshot(_ snapshot: SessionWorkspaceSnapshot) {
         restoredTerminalScrollbackByPanelId.removeAll(keepingCapacity: false)
 
+        let restoreBaseLayoutStyle = restoreBaseLayoutStyle(for: snapshot.layout)
+        setPaneLayoutStyle(restoreBaseLayoutStyle)
+
         let normalizedCurrentDirectory = snapshot.currentDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
         if !normalizedCurrentDirectory.isEmpty {
             currentDirectory = normalizedCurrentDirectory
@@ -188,7 +190,12 @@ extension Workspace {
         }
 
         pruneSurfaceMetadata(validSurfaceIds: Set(panels.keys))
-        applySessionDividerPositions(snapshotNode: snapshot.layout, liveNode: bonsplitController.treeSnapshot())
+        applySessionLayoutGeometry(snapshot.layout, livePanes: leafEntries.map(\.paneId))
+
+        let postRestoreLayoutStyle = postRestoreLayoutStyle(for: snapshot.layout)
+        if postRestoreLayoutStyle != restoreBaseLayoutStyle {
+            setPaneLayoutStyle(postRestoreLayoutStyle)
+        }
 
         applyProcessTitle(snapshot.processTitle)
         setCustomTitle(snapshot.customTitle)
@@ -231,6 +238,59 @@ extension Workspace {
         } else {
             scheduleFocusReconcile()
         }
+
+        restoreSessionViewportIfNeeded(snapshot.layout)
+    }
+
+    private func restoreBaseLayoutStyle(for layout: SessionWorkspaceLayoutSnapshot) -> PaneLayoutStyle {
+        switch layout {
+        case .canvas:
+            return .paperCanvas
+        case .pane, .split:
+            return .splitTree
+        }
+    }
+
+    private func postRestoreLayoutStyle(for layout: SessionWorkspaceLayoutSnapshot) -> PaneLayoutStyle {
+        switch layout {
+        case .canvas:
+            return .paperCanvas
+        case .pane, .split:
+            return Self.paneLayoutStyle
+        }
+    }
+
+    private func setPaneLayoutStyle(_ style: PaneLayoutStyle) {
+        guard bonsplitController.layoutStyle != style else { return }
+        var configuration = bonsplitController.configuration
+        configuration.layoutStyle = style
+        bonsplitController.configuration = configuration
+    }
+
+    private func sessionLayoutSnapshot() -> SessionWorkspaceLayoutSnapshot {
+        if bonsplitController.layoutStyle == .paperCanvas,
+           let paperLayout = bonsplitController.paperCanvasLayout() {
+            let paneSnapshots = paperLayout.panes.map { pane -> SessionCanvasPaneLayoutSnapshot in
+                let panelIds = sessionPanelIDs(inPane: pane.paneId)
+                return SessionCanvasPaneLayoutSnapshot(
+                    panelIds: panelIds,
+                    selectedPanelId: effectiveSelectedPanelId(inPane: pane.paneId),
+                    frame: SessionRectSnapshot(pane.frame)
+                )
+            }
+            let focusedPaneIndex = paperLayout.focusedPaneId.flatMap { focusedPaneId in
+                paperLayout.panes.firstIndex(where: { $0.paneId == focusedPaneId })
+            }
+            return .canvas(
+                SessionCanvasLayoutSnapshot(
+                    panes: paneSnapshots,
+                    focusedPaneIndex: focusedPaneIndex,
+                    viewportOrigin: SessionPointSnapshot(paperLayout.viewportOrigin)
+                )
+            )
+        }
+
+        return sessionLayoutSnapshot(from: bonsplitController.treeSnapshot())
     }
 
     private func sessionLayoutSnapshot(from node: ExternalTreeNode) -> SessionWorkspaceLayoutSnapshot {
@@ -266,6 +326,12 @@ extension Workspace {
             }
         }
         return panelIds
+    }
+
+    private func sessionPanelIDs(inPane paneId: PaneID) -> [UUID] {
+        bonsplitController
+            .tabs(inPane: paneId)
+            .compactMap { panelIdFromSurfaceId($0.id) }
     }
 
     private func sessionPanelID(forExternalTabIDString tabIDString: String) -> UUID? {
@@ -400,9 +466,69 @@ extension Workspace {
             return []
         }
 
+        if case .canvas(let canvas) = layout {
+            return restoreSessionCanvasLayout(canvas, rootPaneId: rootPaneId)
+        }
+
         var leaves: [SessionPaneRestoreEntry] = []
         restoreSessionLayoutNode(layout, inPane: rootPaneId, leaves: &leaves)
         return leaves
+    }
+
+    private func restoreSessionCanvasLayout(
+        _ layout: SessionCanvasLayoutSnapshot,
+        rootPaneId: PaneID
+    ) -> [SessionPaneRestoreEntry] {
+        guard !layout.panes.isEmpty else { return [] }
+
+        var paneIds: [PaneID] = [rootPaneId]
+        var anchorPaneId = rootPaneId
+
+        for (index, paneSnapshot) in layout.panes.enumerated() where index > 0 {
+            let orientation = restoreCanvasSplitOrientation(
+                previous: layout.panes[index - 1].frame.cgRect,
+                next: paneSnapshot.frame.cgRect
+            )
+
+            var anchorPanelId = bonsplitController
+                .tabs(inPane: anchorPaneId)
+                .compactMap { panelIdFromSurfaceId($0.id) }
+                .first
+
+            if anchorPanelId == nil {
+                anchorPanelId = newTerminalSurface(inPane: anchorPaneId, focus: false)?.id
+            }
+
+            guard let anchorPanelId,
+                  let newSplitPanel = newTerminalSplit(
+                    from: anchorPanelId,
+                    orientation: orientation,
+                    insertFirst: false,
+                    focus: false
+                  ),
+                  let newPaneId = paneId(forPanelId: newSplitPanel.id) else {
+                break
+            }
+
+            paneIds.append(newPaneId)
+            anchorPaneId = newPaneId
+        }
+
+        return zip(paneIds, layout.panes).map { pair in
+            SessionPaneRestoreEntry(
+                paneId: pair.0,
+                snapshot: SessionPaneLayoutSnapshot(
+                    panelIds: pair.1.panelIds,
+                    selectedPanelId: pair.1.selectedPanelId
+                )
+            )
+        }
+    }
+
+    private func restoreCanvasSplitOrientation(previous: CGRect, next: CGRect) -> SplitOrientation {
+        let dx = abs(next.midX - previous.midX)
+        let dy = abs(next.midY - previous.midY)
+        return dx >= dy ? .horizontal : .vertical
     }
 
     private func restoreSessionLayoutNode(
@@ -413,6 +539,8 @@ extension Workspace {
         switch node {
         case .pane(let pane):
             leaves.append(SessionPaneRestoreEntry(paneId: paneId, snapshot: pane))
+        case .canvas:
+            return
         case .split(let split):
             var anchorPanelId = bonsplitController
                 .tabs(inPane: paneId)
@@ -610,6 +738,44 @@ extension Workspace {
         default:
             return
         }
+    }
+
+    private func applySessionLayoutGeometry(
+        _ snapshotLayout: SessionWorkspaceLayoutSnapshot,
+        livePanes: [PaneID]
+    ) {
+        switch snapshotLayout {
+        case .canvas(let canvas):
+            let paneSnapshots = zip(livePanes, canvas.panes).map { pair in
+                PaperCanvasPaneSnapshot(
+                    paneId: pair.0,
+                    frame: pair.1.frame.cgRect
+                )
+            }
+            let focusedPaneId = canvas.focusedPaneIndex.flatMap { index in
+                guard livePanes.indices.contains(index) else { return nil }
+                return livePanes[index]
+            }
+            let layout = PaperCanvasLayoutSnapshot(
+                panes: paneSnapshots,
+                viewportOrigin: canvas.viewportOrigin?.cgPoint ?? .zero,
+                focusedPaneId: focusedPaneId
+            )
+            _ = bonsplitController.applyPaperCanvasLayout(layout, notify: false)
+        case .pane, .split:
+            applySessionDividerPositions(
+                snapshotNode: snapshotLayout,
+                liveNode: bonsplitController.treeSnapshot()
+            )
+        }
+    }
+
+    private func restoreSessionViewportIfNeeded(_ layout: SessionWorkspaceLayoutSnapshot) {
+        guard case .canvas(let canvas) = layout,
+              let viewportOrigin = canvas.viewportOrigin?.cgPoint else {
+            return
+        }
+        _ = bonsplitController.setPaperCanvasViewportOrigin(viewportOrigin, notify: false)
     }
 }
 
@@ -2570,6 +2736,11 @@ final class Workspace: Identifiable, ObservableObject {
     /// use the closest horizontal ancestor where the source is in the first (left) branch.
     func preferredBrowserTargetPane(fromPanelId panelId: UUID) -> PaneID? {
         guard let sourcePane = paneId(forPanelId: panelId) else { return nil }
+
+        if bonsplitController.layoutStyle == .paperCanvas {
+            return browserPreferredRightPane(fromPaneId: sourcePane.id.uuidString)
+        }
+
         let sourcePaneId = sourcePane.id.uuidString
         let tree = bonsplitController.treeSnapshot()
         guard let path = browserPathToPane(targetPaneId: sourcePaneId, node: tree) else { return nil }
@@ -2620,12 +2791,7 @@ final class Workspace: Identifiable, ObservableObject {
         guard paneIds.count > 1 else { return nil }
 
         let paneById = Dictionary(uniqueKeysWithValues: paneIds.map { ($0.id.uuidString, $0) })
-        var paneBounds: [String: CGRect] = [:]
-        browserCollectNormalizedPaneBounds(
-            node: bonsplitController.treeSnapshot(),
-            availableRect: CGRect(x: 0, y: 0, width: 1, height: 1),
-            into: &paneBounds
-        )
+        let paneBounds = browserLivePaneFrames()
 
         guard !paneBounds.isEmpty else {
             return paneIds.sorted { $0.id.uuidString < $1.id.uuidString }.first
@@ -2653,6 +2819,60 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         return paneIds.sorted { $0.id.uuidString < $1.id.uuidString }.first
+    }
+
+    private func browserLivePaneFrames() -> [String: CGRect] {
+        Dictionary(uniqueKeysWithValues: bonsplitController.layoutSnapshot().panes.map { pane in
+            (
+                pane.paneId,
+                CGRect(
+                    x: pane.frame.x,
+                    y: pane.frame.y,
+                    width: pane.frame.width,
+                    height: pane.frame.height
+                )
+            )
+        })
+    }
+
+    private func browserPreferredRightPane(fromPaneId sourcePaneId: String) -> PaneID? {
+        let paneFrameById = browserLivePaneFrames()
+        guard let sourceFrame = paneFrameById[sourcePaneId] else { return nil }
+
+        let epsilon = 0.000_1
+        let candidates = paneFrameById.compactMap { candidateId, frame -> (PaneID, CGRect)? in
+            guard candidateId != sourcePaneId,
+                  let candidateUUID = UUID(uuidString: candidateId),
+                  let pane = bonsplitController.allPaneIds.first(where: { $0.id == candidateUUID }),
+                  frame.minX >= sourceFrame.maxX - epsilon else {
+                return nil
+            }
+            return (pane, frame)
+        }
+
+        guard !candidates.isEmpty else { return nil }
+
+        return candidates.sorted { lhs, rhs in
+            let lhsOverlap = max(0, min(lhs.1.maxY, sourceFrame.maxY) - max(lhs.1.minY, sourceFrame.minY))
+            let rhsOverlap = max(0, min(rhs.1.maxY, sourceFrame.maxY) - max(rhs.1.minY, sourceFrame.minY))
+            if abs(lhsOverlap - rhsOverlap) > epsilon {
+                return lhsOverlap > rhsOverlap
+            }
+
+            let lhsDx = lhs.1.minX - sourceFrame.maxX
+            let rhsDx = rhs.1.minX - sourceFrame.maxX
+            if abs(lhsDx - rhsDx) > epsilon {
+                return lhsDx < rhsDx
+            }
+
+            let lhsDy = abs(lhs.1.midY - sourceFrame.midY)
+            let rhsDy = abs(rhs.1.midY - sourceFrame.midY)
+            if abs(lhsDy - rhsDy) > epsilon {
+                return lhsDy < rhsDy
+            }
+
+            return lhs.0.id.uuidString < rhs.0.id.uuidString
+        }.first?.0
     }
 
     private enum BrowserPaneBranch {
@@ -2689,54 +2909,6 @@ final class Workspace: Identifiable, ObservableObject {
         case .split(let splitNode):
             browserCollectPaneNodes(node: splitNode.first, into: &output)
             browserCollectPaneNodes(node: splitNode.second, into: &output)
-        }
-    }
-
-    private func browserCollectNormalizedPaneBounds(
-        node: ExternalTreeNode,
-        availableRect: CGRect,
-        into output: inout [String: CGRect]
-    ) {
-        switch node {
-        case .pane(let paneNode):
-            output[paneNode.id] = availableRect
-        case .split(let splitNode):
-            let divider = min(max(splitNode.dividerPosition, 0), 1)
-            let firstRect: CGRect
-            let secondRect: CGRect
-
-            if splitNode.orientation.lowercased() == "vertical" {
-                // Stacked split: first = top, second = bottom
-                firstRect = CGRect(
-                    x: availableRect.minX,
-                    y: availableRect.minY,
-                    width: availableRect.width,
-                    height: availableRect.height * divider
-                )
-                secondRect = CGRect(
-                    x: availableRect.minX,
-                    y: availableRect.minY + (availableRect.height * divider),
-                    width: availableRect.width,
-                    height: availableRect.height * (1 - divider)
-                )
-            } else {
-                // Side-by-side split: first = left, second = right
-                firstRect = CGRect(
-                    x: availableRect.minX,
-                    y: availableRect.minY,
-                    width: availableRect.width * divider,
-                    height: availableRect.height
-                )
-                secondRect = CGRect(
-                    x: availableRect.minX + (availableRect.width * divider),
-                    y: availableRect.minY,
-                    width: availableRect.width * (1 - divider),
-                    height: availableRect.height
-                )
-            }
-
-            browserCollectNormalizedPaneBounds(node: splitNode.first, availableRect: firstRect, into: &output)
-            browserCollectNormalizedPaneBounds(node: splitNode.second, availableRect: secondRect, into: &output)
         }
     }
 
@@ -2781,6 +2953,10 @@ final class Workspace: Identifiable, ObservableObject {
         forPaneId targetPaneId: String,
         in node: ExternalTreeNode
     ) -> BrowserCloseFallbackPlan? {
+        if bonsplitController.layoutStyle == .paperCanvas {
+            return paperCanvasBrowserCloseFallbackPlan(forPaneId: targetPaneId)
+        }
+
         switch node {
         case .pane:
             return nil
@@ -2812,6 +2988,45 @@ final class Workspace: Identifiable, ObservableObject {
             }
             return browserCloseFallbackPlan(forPaneId: targetPaneId, in: splitNode.second)
         }
+    }
+
+    private func paperCanvasBrowserCloseFallbackPlan(forPaneId targetPaneId: String) -> BrowserCloseFallbackPlan? {
+        let paneFrames = browserLivePaneFrames()
+        guard let targetFrame = paneFrames[targetPaneId] else { return nil }
+
+        let candidates = paneFrames.compactMap { candidateId, frame -> (UUID, CGRect)? in
+            guard candidateId != targetPaneId,
+                  let candidateUUID = UUID(uuidString: candidateId) else {
+                return nil
+            }
+            return (candidateUUID, frame)
+        }
+
+        guard let nearest = candidates.min(by: { lhs, rhs in
+            let lhsDx = lhs.1.midX - targetFrame.midX
+            let lhsDy = lhs.1.midY - targetFrame.midY
+            let rhsDx = rhs.1.midX - targetFrame.midX
+            let rhsDy = rhs.1.midY - targetFrame.midY
+            let lhsDistance = (lhsDx * lhsDx) + (lhsDy * lhsDy)
+            let rhsDistance = (rhsDx * rhsDx) + (rhsDy * rhsDy)
+            if lhsDistance != rhsDistance {
+                return lhsDistance < rhsDistance
+            }
+            return lhs.0.uuidString < rhs.0.uuidString
+        }) else {
+            return nil
+        }
+
+        let dx = targetFrame.midX - nearest.1.midX
+        let dy = targetFrame.midY - nearest.1.midY
+        let orientation: SplitOrientation = abs(dx) >= abs(dy) ? .horizontal : .vertical
+        let insertFirst: Bool = orientation == .horizontal ? dx < 0 : dy < 0
+
+        return BrowserCloseFallbackPlan(
+            orientation: orientation,
+            insertFirst: insertFirst,
+            anchorPaneId: nearest.0
+        )
     }
 
     private func browserPaneCenter(_ pane: ExternalPaneNode) -> (x: Double, y: Double) {

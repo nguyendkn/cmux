@@ -4967,6 +4967,61 @@ class TerminalController {
                 return
             }
 
+            if ws.bonsplitController.layoutStyle == .paperCanvas {
+                let navigationDirection: NavigationDirection
+                switch direction {
+                case .left:
+                    navigationDirection = .left
+                case .right:
+                    navigationDirection = .right
+                case .up:
+                    navigationDirection = .up
+                case .down:
+                    navigationDirection = .down
+                }
+
+                guard ws.bonsplitController.resizePaperPane(
+                    PaneID(id: paneUUID),
+                    direction: navigationDirection,
+                    amount: CGFloat(amount),
+                    notify: true
+                ) else {
+                    result = .err(
+                        code: "internal_error",
+                        message: "Failed to resize paper pane",
+                        data: ["pane_id": paneUUID.uuidString]
+                    )
+                    return
+                }
+
+                let frameData: [String: Any]? = ws.bonsplitController
+                    .paperCanvasLayout()?
+                    .panes
+                    .first(where: { $0.paneId.id == paneUUID })
+                    .map { pane in
+                        [
+                            "x": pane.frame.minX,
+                            "y": pane.frame.minY,
+                            "width": pane.frame.width,
+                            "height": pane.frame.height
+                        ]
+                    }
+
+                let windowId = v2ResolveWindowId(tabManager: tabManager)
+                result = .ok([
+                    "window_id": v2OrNull(windowId?.uuidString),
+                    "window_ref": v2Ref(kind: .window, uuid: windowId),
+                    "workspace_id": ws.id.uuidString,
+                    "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                    "pane_id": paneUUID.uuidString,
+                    "pane_ref": v2Ref(kind: .pane, uuid: paneUUID),
+                    "direction": direction.rawValue,
+                    "amount": amount,
+                    "frame": v2OrNull(frameData)
+                ])
+                return
+            }
+
             let tree = ws.bonsplitController.treeSnapshot()
             var candidates: [V2PaneResizeCandidate] = []
             let trace = v2PaneResizeCollectCandidates(

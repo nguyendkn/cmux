@@ -161,6 +161,25 @@ struct SessionRectSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+struct SessionPointSnapshot: Codable, Equatable, Sendable {
+    let x: Double
+    let y: Double
+
+    init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+
+    init(_ point: CGPoint) {
+        self.x = Double(point.x)
+        self.y = Double(point.y)
+    }
+
+    var cgPoint: CGPoint {
+        CGPoint(x: x, y: y)
+    }
+}
+
 struct SessionDisplaySnapshot: Codable, Sendable {
     var displayID: UInt32?
     var frame: SessionRectSnapshot?
@@ -283,6 +302,18 @@ struct SessionPaneLayoutSnapshot: Codable, Sendable {
     var selectedPanelId: UUID?
 }
 
+struct SessionCanvasPaneLayoutSnapshot: Codable, Sendable {
+    var panelIds: [UUID]
+    var selectedPanelId: UUID?
+    var frame: SessionRectSnapshot
+}
+
+struct SessionCanvasLayoutSnapshot: Codable, Sendable {
+    var panes: [SessionCanvasPaneLayoutSnapshot]
+    var focusedPaneIndex: Int?
+    var viewportOrigin: SessionPointSnapshot?
+}
+
 struct SessionSplitLayoutSnapshot: Codable, Sendable {
     var orientation: SessionSplitOrientation
     var dividerPosition: Double
@@ -292,11 +323,13 @@ struct SessionSplitLayoutSnapshot: Codable, Sendable {
 
 indirect enum SessionWorkspaceLayoutSnapshot: Codable, Sendable {
     case pane(SessionPaneLayoutSnapshot)
+    case canvas(SessionCanvasLayoutSnapshot)
     case split(SessionSplitLayoutSnapshot)
 
     private enum CodingKeys: String, CodingKey {
         case type
         case pane
+        case canvas
         case split
     }
 
@@ -306,6 +339,8 @@ indirect enum SessionWorkspaceLayoutSnapshot: Codable, Sendable {
         switch type {
         case "pane":
             self = .pane(try container.decode(SessionPaneLayoutSnapshot.self, forKey: .pane))
+        case "canvas":
+            self = .canvas(try container.decode(SessionCanvasLayoutSnapshot.self, forKey: .canvas))
         case "split":
             self = .split(try container.decode(SessionSplitLayoutSnapshot.self, forKey: .split))
         default:
@@ -319,6 +354,9 @@ indirect enum SessionWorkspaceLayoutSnapshot: Codable, Sendable {
         case .pane(let pane):
             try container.encode("pane", forKey: .type)
             try container.encode(pane, forKey: .pane)
+        case .canvas(let canvas):
+            try container.encode("canvas", forKey: .type)
+            try container.encode(canvas, forKey: .canvas)
         case .split(let split):
             try container.encode("split", forKey: .type)
             try container.encode(split, forKey: .split)

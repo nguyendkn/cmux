@@ -125,6 +125,45 @@ final class SplitViewController {
         }
     }
 
+    func paperCanvasLayoutSnapshot() -> PaperCanvasLayoutSnapshot? {
+        guard layoutStyle == .paperCanvas else { return nil }
+        return paperCanvas?.layoutSnapshot(focusedPaneId: focusedPaneId)
+    }
+
+    @discardableResult
+    func applyPaperCanvasLayout(_ layout: PaperCanvasLayoutSnapshot) -> Bool {
+        guard layoutStyle == .paperCanvas else { return false }
+        if paperCanvas == nil {
+            enablePaperCanvasLayout()
+        }
+
+        let paneFrames = Dictionary(uniqueKeysWithValues: layout.panes.map { ($0.paneId, $0.frame) })
+        paperCanvas?.applyLayout(
+            paneFrames: paneFrames,
+            viewportOrigin: layout.viewportOrigin,
+            focusedPaneId: layout.focusedPaneId
+        )
+
+        if let focusedPaneId = layout.focusedPaneId,
+           paneState(focusedPaneId) != nil {
+            self.focusedPaneId = focusedPaneId
+        } else if self.focusedPaneId == nil {
+            self.focusedPaneId = paperCanvas?.allPaneIds.first
+        }
+
+        return true
+    }
+
+    @discardableResult
+    func setPaperCanvasViewportOrigin(_ origin: CGPoint) -> Bool {
+        guard layoutStyle == .paperCanvas else { return false }
+        if paperCanvas == nil {
+            enablePaperCanvasLayout()
+        }
+        paperCanvas?.setViewportOrigin(origin)
+        return paperCanvas != nil
+    }
+
     var allPaneIds: [PaneID] {
         switch layoutStyle {
         case .splitTree:
@@ -563,6 +602,21 @@ final class SplitViewController {
             }
         }
         return nil
+    }
+
+    @discardableResult
+    func resizePaperPane(_ paneId: PaneID, direction: NavigationDirection, amount: CGFloat) -> CGRect? {
+        guard layoutStyle == .paperCanvas else { return nil }
+        if paperCanvas == nil {
+            enablePaperCanvasLayout()
+        }
+        let minimumSize = CGSize(width: minimumPaneWidth, height: minimumPaneHeight)
+        return paperCanvas?.resizePane(
+            paneId,
+            direction: direction,
+            amount: amount,
+            minimumSize: minimumSize
+        )
     }
 
     func createNewTab() {
