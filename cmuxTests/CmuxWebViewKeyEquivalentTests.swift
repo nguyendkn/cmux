@@ -14757,6 +14757,45 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertFalse(surface.ownsResponder(window.firstResponder))
     }
 
+    func testSurfaceHostWindowVisibilityAndResponderPolicyRoundTripThroughRuntime() {
+        _ = NSApplication.shared
+
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration()
+        )
+        guard let webView = surface.webView as? CmuxWebView else {
+            return XCTFail("Expected CmuxWebView runtime surface")
+        }
+
+        XCTAssertNil(surface.hostWindow())
+        XCTAssertFalse(surface.isHiddenOrHasHiddenAncestor())
+        XCTAssertTrue(webView.allowsFirstResponderAcquisition)
+
+        surface.setAllowsFirstResponderAcquisition(false)
+        XCTAssertFalse(webView.allowsFirstResponderAcquisition)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: window.contentRect(forFrameRect: window.frame))
+        container.isHidden = true
+        window.contentView = container
+        container.addSubview(surface.webView)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        drainMainQueue()
+
+        XCTAssertTrue(surface.hostWindow() === window)
+        XCTAssertTrue(surface.isHiddenOrHasHiddenAncestor())
+
+        surface.setAllowsFirstResponderAcquisition(true)
+        XCTAssertTrue(webView.allowsFirstResponderAcquisition)
+    }
+
     func testDeveloperToolsHostStateReflectsAttachedInspectorLayoutAndDetachedWindows() {
         _ = NSApplication.shared
 
@@ -15002,6 +15041,85 @@ final class LocalWebKitBrowserSurfaceRuntimeTests: XCTestCase {
         XCTAssertEqual(requestedURLs, [expectedIconURL, expectedIconURL])
     }
 
+    func testFetchFaviconPNGDataDoesNotReuseStaleCacheKeyAfterWebViewReplacement() async throws {
+        let expectedIconURL = URL(string: "https://example.com/icons/runtime-64.png")!
+        let iconData = try makePNGData(color: .systemRed)
+        var requestedURLs: [URL] = []
+        let firstFetchStarted = expectation(description: "first favicon fetch started")
+        let firstNavigationFinished = expectation(description: "first favicon page loaded")
+        let secondNavigationFinished = expectation(description: "second favicon page loaded")
+        var firstFetchContinuation: CheckedContinuation<(Data, URLResponse), Never>?
+        var navigationCount = 0
+        let surface = LocalWebKitBrowserSurfaceRuntime(
+            processPool: WKProcessPool(),
+            configuration: makeConfiguration(scriptSources: []),
+            faviconDataLoader: { request in
+                let url = try XCTUnwrap(request.url)
+                requestedURLs.append(url)
+                let response = try XCTUnwrap(
+                    HTTPURLResponse(
+                        url: url,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )
+                )
+                if requestedURLs.count == 1 {
+                    firstFetchStarted.fulfill()
+                    return await withCheckedContinuation { continuation in
+                        firstFetchContinuation = continuation
+                    }
+                }
+                return (iconData, response)
+            }
+        )
+        surface.eventHandlers = BrowserSurfaceRuntimeEventHandlers(
+            didFinishNavigation: {
+                navigationCount += 1
+                if navigationCount == 1 {
+                    firstNavigationFinished.fulfill()
+                } else {
+                    secondNavigationFinished.fulfill()
+                }
+            }
+        )
+
+        let html = """
+            <html>
+            <head>
+            <link rel="icon" href="\(expectedIconURL.absoluteString)" sizes="64x64" />
+            </head>
+            <body>favicon</body>
+            </html>
+            """
+        let baseURL = URL(string: "https://example.com/page")!
+        surface.loadHTMLString(html, baseURL: baseURL)
+        await fulfillment(of: [firstNavigationFinished], timeout: 5)
+
+        let staleFetch = Task { await surface.fetchFaviconPNGData() }
+        await fulfillment(of: [firstFetchStarted], timeout: 5)
+
+        _ = surface.replaceWebView(using: makeConfiguration(scriptSources: []), pageZoom: nil)
+        surface.loadHTMLString(html, baseURL: baseURL)
+        await fulfillment(of: [secondNavigationFinished], timeout: 5)
+
+        let firstResponse = try XCTUnwrap(
+            HTTPURLResponse(
+                url: expectedIconURL,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )
+        )
+        firstFetchContinuation?.resume(returning: (iconData, firstResponse))
+        let staleResult = await staleFetch.value
+        let freshResult = await surface.fetchFaviconPNGData()
+
+        XCTAssertNil(staleResult)
+        XCTAssertNotNil(freshResult)
+        XCTAssertEqual(requestedURLs, [expectedIconURL, expectedIconURL])
+    }
+
     func testFindAdapterUsesRuntimeOwnedFindOperations() async throws {
         let surface = LocalWebKitBrowserSurfaceRuntime(
             processPool: WKProcessPool(),
@@ -15208,6 +15326,7 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         private(set) var ownsResponderCallCount = 0
         private(set) var focusSurfaceCallCount = 0
         private(set) var unfocusSurfaceCallCount = 0
+        private(set) var lastAllowsFirstResponderAcquisition: Bool?
         private(set) var lastOwnedResponder: NSResponder?
         private(set) var lastRevealDeveloperToolsAttachIfNeeded: Bool?
         var captureAddressBarPageFocusStatus: BrowserAddressBarPageFocusCaptureStatus = .clearedNone
@@ -15226,9 +15345,13 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             hasAttachedInspectorLayout: false,
             detachedWindowCount: 0
         )
+        var revealDeveloperToolsMutatesVisibility = true
+        var concealDeveloperToolsMutatesVisibility = true
         var ownsResponderResult = false
         var focusSurfaceResult = true
         var unfocusSurfaceResult = true
+        var currentHostWindow: NSWindow?
+        var currentIsHiddenOrHasHiddenAncestor = false
 
         init() {
             let configuration = WKWebViewConfiguration()
@@ -15394,7 +15517,9 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
             revealDeveloperToolsCallCount += 1
             lastRevealDeveloperToolsAttachIfNeeded = attachIfNeeded
             guard currentDeveloperToolsVisibilityState != .unavailable else { return false }
-            currentDeveloperToolsVisibilityState = .visible
+            if revealDeveloperToolsMutatesVisibility {
+                currentDeveloperToolsVisibilityState = .visible
+            }
             return true
         }
 
@@ -15402,7 +15527,9 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         func concealDeveloperTools() -> Bool {
             concealDeveloperToolsCallCount += 1
             guard currentDeveloperToolsVisibilityState != .unavailable else { return false }
-            currentDeveloperToolsVisibilityState = .hidden
+            if concealDeveloperToolsMutatesVisibility {
+                currentDeveloperToolsVisibilityState = .hidden
+            }
             return true
         }
 
@@ -15416,6 +15543,18 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
                 hasAttachedInspectorLayout: currentDeveloperToolsHostState.hasAttachedInspectorLayout,
                 detachedWindowCount: 0
             )
+        }
+
+        func hostWindow() -> NSWindow? {
+            currentHostWindow
+        }
+
+        func isHiddenOrHasHiddenAncestor() -> Bool {
+            currentIsHiddenOrHasHiddenAncestor
+        }
+
+        func setAllowsFirstResponderAcquisition(_ allowed: Bool) {
+            lastAllowsFirstResponderAcquisition = allowed
         }
 
         func ownsResponder(_ responder: NSResponder?) -> Bool {
@@ -15581,6 +15720,17 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
         XCTAssertEqual(runtime.focusSurfaceCallCount, 1)
     }
 
+    func testBrowserPanelFocusSurfaceForHandoffUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.focusSurfaceForHandoff())
+        XCTAssertEqual(runtime.focusSurfaceCallCount, 1)
+    }
+
     func testBrowserPanelUnfocusUsesRuntimeBoundary() {
         let runtime = RecordingBrowserSurfaceRuntime()
         let panel = BrowserPanel(
@@ -15632,6 +15782,38 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
 
         XCTAssertTrue(panel.yieldFocusIntent(.browser(.webView), in: window))
         XCTAssertEqual(runtime.unfocusSurfaceCallCount, 1)
+    }
+
+    func testBrowserPanelSurfaceHelpersUseRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panelWindow = NSWindow()
+        runtime.currentHostWindow = panelWindow
+        runtime.currentIsHiddenOrHasHiddenAncestor = true
+        runtime.state = makeRuntimeState(currentURL: nil, isLoading: true)
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.surfaceWindow() === panelWindow)
+        XCTAssertTrue(panel.isSurfaceHiddenOrHasHiddenAncestor())
+        XCTAssertTrue(panel.isSurfaceBlankForAutofocus())
+        XCTAssertTrue(panel.isSurfaceLoadingNow())
+    }
+
+    func testBrowserPanelResponderPolicyUsesRuntimeBoundary() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        panel.syncSurfaceFirstResponderAcquisitionPolicy(isPanelFocused: true)
+        XCTAssertEqual(runtime.lastAllowsFirstResponderAcquisition, true)
+
+        panel.suppressWebViewFocus(for: 5)
+        panel.syncSurfaceFirstResponderAcquisitionPolicy(isPanelFocused: true)
+        XCTAssertEqual(runtime.lastAllowsFirstResponderAcquisition, false)
     }
 
     func testBrowserPanelFindUsesRuntimeBoundary() async {
@@ -15766,6 +15948,25 @@ final class BrowserPanelRuntimeBoundaryTests: XCTestCase {
 
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         XCTAssertTrue(panel.hideDeveloperTools())
+        XCTAssertEqual(runtime.concealDeveloperToolsCallCount, 1)
+        XCTAssertFalse(panel.isDeveloperToolsVisible())
+    }
+
+    func testBrowserPanelQueuesHideAcrossAsyncShowTransition() {
+        let runtime = RecordingBrowserSurfaceRuntime()
+        runtime.currentDeveloperToolsVisibilityState = .hidden
+        runtime.revealDeveloperToolsMutatesVisibility = false
+        let panel = BrowserPanel(
+            workspaceId: UUID(),
+            runtimeFactory: RecordingBrowserSurfaceRuntimeFactory(runtime: runtime)
+        )
+
+        XCTAssertTrue(panel.showDeveloperTools())
+        XCTAssertTrue(panel.hideDeveloperTools())
+
+        runtime.currentDeveloperToolsVisibilityState = .visible
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
         XCTAssertEqual(runtime.concealDeveloperToolsCallCount, 1)
         XCTAssertFalse(panel.isDeveloperToolsVisible())
     }

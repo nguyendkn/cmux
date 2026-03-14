@@ -1686,6 +1686,9 @@ protocol BrowserSurfaceRuntime: AnyObject {
     func concealDeveloperTools() -> Bool
     func showDeveloperToolsConsole()
     func dismissDetachedDeveloperToolsWindows()
+    func hostWindow() -> NSWindow?
+    func isHiddenOrHasHiddenAncestor() -> Bool
+    func setAllowsFirstResponderAcquisition(_ allowed: Bool)
     func ownsResponder(_ responder: NSResponder?) -> Bool
     @discardableResult
     func focusSurface() -> Bool
@@ -2007,6 +2010,7 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
 
     func fetchFaviconPNGData() async -> Data? {
         let webView = self.webView
+        let fetchWebViewInstanceID = webViewInstanceID
         guard let pageURL = webView.url else { return nil }
         guard let scheme = pageURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
 
@@ -2017,6 +2021,7 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
                 discoveredURL = url
             }
         }
+        guard fetchWebViewInstanceID == webViewInstanceID else { return nil }
 
         let fallbackURL = URL(string: "/favicon.ico", relativeTo: pageURL)
         guard let iconURL = discoveredURL ?? fallbackURL else { return nil }
@@ -2025,7 +2030,6 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         if iconURLString == lastFaviconURLString {
             return nil
         }
-        lastFaviconURLString = iconURLString
 
         var request = URLRequest(url: iconURL)
         request.timeoutInterval = 2.0
@@ -2039,13 +2043,18 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         } catch {
             return nil
         }
+        guard fetchWebViewInstanceID == webViewInstanceID else { return nil }
 
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
             return nil
         }
 
-        return Self.makeFaviconPNGData(from: data, targetPx: 32)
+        guard let png = Self.makeFaviconPNGData(from: data, targetPx: 32) else {
+            return nil
+        }
+        lastFaviconURLString = iconURLString
+        return png
     }
 
     func developerToolsVisibilityState() -> BrowserSurfaceDeveloperToolsVisibilityState {
@@ -2122,6 +2131,19 @@ final class LocalWebKitBrowserSurfaceRuntime: BrowserSurfaceRuntime {
         for window in BrowserSurfaceDeveloperToolsHostIntrospection.detachedInspectorWindows(excluding: webView.window) {
             window.close()
         }
+    }
+
+    func hostWindow() -> NSWindow? {
+        webView.window
+    }
+
+    func isHiddenOrHasHiddenAncestor() -> Bool {
+        webView.isHiddenOrHasHiddenAncestor
+    }
+
+    func setAllowsFirstResponderAcquisition(_ allowed: Bool) {
+        guard let cmuxWebView = webView as? CmuxWebView else { return }
+        cmuxWebView.allowsFirstResponderAcquisition = allowed
     }
 
     func ownsResponder(_ responder: NSResponder?) -> Bool {
@@ -3874,7 +3896,7 @@ extension BrowserPanel {
             forceDeveloperToolsRefreshOnNextAttach = false
         }
 
-        if source.hasPrefix("toggle"), visible != targetVisible {
+        if visible != targetVisible {
             scheduleDeveloperToolsTransitionSettle(source: source)
         } else {
             developerToolsTransitionTargetVisible = nil
@@ -4239,6 +4261,42 @@ extension BrowserPanel {
 
     func refreshAppearanceDrivenColors() {
         runtime.setUnderPageBackgroundColor(GhosttyBackgroundTheme.currentColor())
+    }
+
+    func surfaceWindow() -> NSWindow? {
+        runtime.hostWindow()
+    }
+
+    func isSurfaceHiddenOrHasHiddenAncestor() -> Bool {
+        runtime.isHiddenOrHasHiddenAncestor()
+    }
+
+    func isSurfaceBlankForAutofocus() -> Bool {
+        guard let url = runtime.state.currentURL else { return true }
+        return url.absoluteString == blankURLString
+    }
+
+    func isSurfaceLoadingNow() -> Bool {
+        runtime.state.isLoading
+    }
+
+    func syncSurfaceFirstResponderAcquisitionPolicy(isPanelFocused: Bool) {
+        runtime.setAllowsFirstResponderAcquisition(
+            isPanelFocused && !shouldSuppressWebViewFocus()
+        )
+    }
+
+    @discardableResult
+    func focusSurfaceForHandoff() -> Bool {
+        let focused = runtime.focusSurface()
+        if focused {
+            noteWebViewFocused()
+        }
+        return focused
+    }
+
+    func surfaceOwnsResponder(_ responder: NSResponder?) -> Bool {
+        runtime.ownsResponder(responder)
     }
 
     func suppressOmnibarAutofocus(for seconds: TimeInterval) {
