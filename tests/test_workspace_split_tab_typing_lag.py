@@ -509,8 +509,7 @@ def main() -> int:
 
         pid = get_cmux_pid_for_socket(client.socket_path)
         if pid is None:
-            print("SKIP: cmux process not found for socket")
-            return 0
+            print("WARN: cmux process not found for socket, failure sampling disabled")
 
         with RawSocketClient(client.socket_path) as raw:
             baseline_shortcuts, baseline_visible, baseline_panel_id = run_baseline_scenario(client, raw)
