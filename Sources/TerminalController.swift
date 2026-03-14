@@ -13156,9 +13156,24 @@ class TerminalController {
         guard let key = parsed.positional.first else {
             return "ERROR: Usage: clear_agent_pid <key> [--tab=<id>]"
         }
+        // Capture the tab UUID before dispatching to avoid resolving against
+        // a potentially changed selection on the main queue.
+        let tabUUID = parsed.options["tab"]
+            .flatMap { UUID(uuidString: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
         DispatchQueue.main.async { [weak self] in
-            guard let self, let tab = self.resolveTabForReport(args) else { return }
-            tab.agentPIDs.removeValue(forKey: key)
+            guard let self else { return }
+            let tab: Tab?
+            if let tabUUID {
+                if let t = self.tabManager?.tabs.first(where: { $0.id == tabUUID }) {
+                    tab = t
+                } else {
+                    tab = AppDelegate.shared?.tabManagerFor(tabId: tabUUID)?
+                        .tabs.first(where: { $0.id == tabUUID })
+                }
+            } else {
+                tab = self.resolveTabForReport(args)
+            }
+            tab?.agentPIDs.removeValue(forKey: key)
         }
         return "OK"
     }

@@ -835,14 +835,26 @@ class TabManager: ObservableObject {
         for tab in tabs {
             var keysToRemove: [String] = []
             for (key, pid) in tab.agentPIDs {
-                // kill(pid, 0) returns 0 if the process exists, -1 if not.
-                if kill(pid, 0) != 0 {
+                guard pid > 0 else {
+                    keysToRemove.append(key)
+                    continue
+                }
+                // kill(pid, 0) probes process liveness without sending a signal.
+                // ESRCH = process doesn't exist (stale). EPERM = process exists
+                // but we lack permission (not stale, keep tracking).
+                errno = 0
+                if kill(pid, 0) == -1, POSIXErrorCode(rawValue: errno) == .ESRCH {
                     keysToRemove.append(key)
                 }
             }
-            for key in keysToRemove {
-                tab.statusEntries.removeValue(forKey: key)
-                tab.agentPIDs.removeValue(forKey: key)
+            if !keysToRemove.isEmpty {
+                for key in keysToRemove {
+                    tab.statusEntries.removeValue(forKey: key)
+                    tab.agentPIDs.removeValue(forKey: key)
+                }
+                // Also clear stale notifications (e.g. "Doing well, thanks!")
+                // left behind when Claude was killed without SessionEnd firing.
+                AppDelegate.shared?.notificationStore?.clearNotifications(forTabId: tab.id)
             }
         }
     }

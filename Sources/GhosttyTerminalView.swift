@@ -1926,11 +1926,12 @@ class GhosttyApp {
                     // Suppress OSC notifications for workspaces with active Claude hook sessions.
                     // The hook system manages notifications with proper lifecycle tracking;
                     // raw OSC notifications would duplicate or outlive the structured hooks.
-                    if let workspace = tabManager.tabs.first(where: { $0.id == tabId }),
+                    let owningManager = AppDelegate.shared?.tabManagerFor(tabId: tabId) ?? tabManager
+                    if let workspace = owningManager.tabs.first(where: { $0.id == tabId }),
                        workspace.agentPIDs["claude_code"] != nil {
                         return true
                     }
-                    let tabTitle = tabManager.titleForTab(tabId) ?? "Terminal"
+                    let tabTitle = owningManager.titleForTab(tabId) ?? "Terminal"
                     let command = actionTitle.isEmpty ? tabTitle : actionTitle
                     let body = actionBody
                     let surfaceId = tabManager.focusedSurfaceId(for: tabId)
@@ -2203,11 +2204,12 @@ class GhosttyApp {
                 .flatMap { String(cString: $0) } ?? ""
             performOnMain {
                 // Suppress OSC notifications for workspaces with active Claude hook sessions.
-                if let workspace = AppDelegate.shared?.tabManager?.tabs.first(where: { $0.id == tabId }),
-                   workspace.statusEntries["claude_code"] != nil {
+                let owningManager = AppDelegate.shared?.tabManagerFor(tabId: tabId) ?? AppDelegate.shared?.tabManager
+                if let workspace = owningManager?.tabs.first(where: { $0.id == tabId }),
+                   workspace.agentPIDs["claude_code"] != nil {
                     return
                 }
-                let tabTitle = AppDelegate.shared?.tabManager?.titleForTab(tabId) ?? "Terminal"
+                let tabTitle = owningManager?.titleForTab(tabId) ?? "Terminal"
                 let command = actionTitle.isEmpty ? tabTitle : actionTitle
                 let body = actionBody
                 TerminalNotificationStore.shared.addNotification(
