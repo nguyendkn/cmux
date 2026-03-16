@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Darwin
 import Bonsplit
+import Observation
 import UniformTypeIdentifiers
 
 @main
@@ -1239,13 +1240,14 @@ private struct SettingsAboutTitlebarDebugOptions: Equatable {
 }
 
 @MainActor
-private final class SettingsAboutTitlebarDebugStore: ObservableObject {
+@Observable
+private final class SettingsAboutTitlebarDebugStore {
     static let shared = SettingsAboutTitlebarDebugStore()
 
-    @Published var settingsOptions = SettingsAboutTitlebarDebugOptions.defaults(for: .settings) {
+    var settingsOptions = SettingsAboutTitlebarDebugOptions.defaults(for: .settings) {
         didSet { applyToOpenWindows(for: .settings) }
     }
-    @Published var aboutOptions = SettingsAboutTitlebarDebugOptions.defaults(for: .about) {
+    var aboutOptions = SettingsAboutTitlebarDebugOptions.defaults(for: .about) {
         didSet { applyToOpenWindows(for: .about) }
     }
 
@@ -1415,7 +1417,7 @@ private final class SettingsAboutTitlebarDebugWindowController: NSWindowControll
 }
 
 private struct SettingsAboutTitlebarDebugView: View {
-    @ObservedObject private var store = SettingsAboutTitlebarDebugStore.shared
+    @State private var store = SettingsAboutTitlebarDebugStore.shared
 
     var body: some View {
         ScrollView {
