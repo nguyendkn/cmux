@@ -10,6 +10,8 @@
 
 **Testing Strategy:** iOS tests should use the existing `XCTest` harness, not `swift-testing`, and GRDB tests should use an in-memory database so they do not depend on simulator filesystem state. Convex module tests should run under `packages/convex/vitest.config.ts`, and Hono route tests should run under `apps/www/vitest.config.ts`. The dogfood gate is not just unit tests. It requires passing simulator tests, backend Vitest suites, `bun check` in `manaflow`, and a manual physical-device checklist covering cold launch, live updates, Tailscale attach, and APNS routing.
 
+**Execution Status (2026-03-17):** Implementation is complete on `task-move-ios-app-into-cmux-repo` and `feat-ios-dogfood-convex`. Automated verification is green, tagged simulator installs succeed, and tagged device install succeeds when the phone stays connected. Physical-device launch still requires the phone to be unlocked, so the remaining step is the human dogfood pass, not additional implementation work.
+
 ---
 
 ## Chunk 1: Freeze The Dogfood Contract
