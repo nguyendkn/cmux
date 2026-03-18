@@ -515,3 +515,7 @@ After all tests and dogfood checks pass:
 - announce that you are using `finishing-a-development-branch`
 - follow that skill
 - do not merge to `main` unless the user explicitly asks in that turn
+
+## Follow-on Note
+
+The signed-in Mac path from this plan now feeds the mobile HTTP boundary documented in `2026-03-18-ios-convex-grdb-cache-boundary.md`. The Mac app still publishes machine session and heartbeat data through server routes, while the iOS app boots from GRDB first and only uses Convex behind the dedicated live-sync seam.
