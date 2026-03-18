@@ -63393,6 +63393,57 @@
         }
       }
     },
+    "sidebar.pullRequest.statusOpenFailing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "open · failing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オープン・失敗"
+          }
+        }
+      }
+    },
+    "sidebar.pullRequest.statusOpenPassing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "open · passing"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オープン・成功"
+          }
+        }
+      }
+    },
+    "sidebar.pullRequest.statusOpenPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "open · pending"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オープン・保留中"
+          }
+        }
+      }
+    },
     "sidebar.workspace.accessibilityHint": {
       "extractionState": "manual",
       "localizations": {

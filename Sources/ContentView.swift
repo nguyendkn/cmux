@@ -10771,14 +10771,13 @@ private struct TabItemView: View, Equatable {
                             HStack(spacing: 4) {
                                 PullRequestStatusIcon(
                                     status: pullRequest.status,
-                                    checks: pullRequest.checks,
                                     color: pullRequestForegroundColor
                                 )
                                 Text("\(pullRequest.label) #\(pullRequest.number)")
                                     .underline()
                                     .lineLimit(1)
                                     .truncationMode(.tail)
-                                Text(pullRequestStatusLabel(pullRequest.status))
+                                Text(pullRequestStatusLabel(pullRequest.status, checks: pullRequest.checks))
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
                             }
@@ -11510,9 +11509,31 @@ private struct TabItemView: View, Equatable {
         NSWorkspace.shared.open(url)
     }
 
-    private func pullRequestStatusLabel(_ status: SidebarPullRequestStatus) -> String {
+    private func pullRequestStatusLabel(
+        _ status: SidebarPullRequestStatus,
+        checks: SidebarPullRequestChecksStatus?
+    ) -> String {
         switch status {
-        case .open: return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
+        case .open:
+            switch checks {
+            case .pass:
+                return String(
+                    localized: "sidebar.pullRequest.statusOpenPassing",
+                    defaultValue: "open · passing"
+                )
+            case .fail:
+                return String(
+                    localized: "sidebar.pullRequest.statusOpenFailing",
+                    defaultValue: "open · failing"
+                )
+            case .pending:
+                return String(
+                    localized: "sidebar.pullRequest.statusOpenPending",
+                    defaultValue: "open · pending"
+                )
+            case nil:
+                return String(localized: "sidebar.pullRequest.statusOpen", defaultValue: "open")
+            }
         case .merged: return String(localized: "sidebar.pullRequest.statusMerged", defaultValue: "merged")
         case .closed: return String(localized: "sidebar.pullRequest.statusClosed", defaultValue: "closed")
         }
@@ -11566,14 +11587,13 @@ private struct TabItemView: View, Equatable {
 
     private struct PullRequestStatusIcon: View {
         let status: SidebarPullRequestStatus
-        let checks: SidebarPullRequestChecksStatus?
         let color: Color
         private static let frameSize: CGFloat = 12
 
         var body: some View {
             switch status {
             case .open:
-                openIcon
+                PullRequestOpenIcon(color: color)
             case .merged:
                 PullRequestMergedIcon(color: color)
             case .closed:
@@ -11581,29 +11601,6 @@ private struct TabItemView: View, Equatable {
                     .font(.system(size: 7, weight: .regular))
                     .foregroundColor(color)
                     .frame(width: Self.frameSize, height: Self.frameSize)
-            }
-        }
-
-        @ViewBuilder
-        private var openIcon: some View {
-            switch checks {
-            case .pass:
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundColor(.green)
-                    .frame(width: Self.frameSize, height: Self.frameSize)
-            case .fail:
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundColor(.red)
-                    .frame(width: Self.frameSize, height: Self.frameSize)
-            case .pending:
-                Image(systemName: "clock.fill")
-                    .font(.system(size: 7, weight: .semibold))
-                    .foregroundColor(.orange)
-                    .frame(width: Self.frameSize, height: Self.frameSize)
-            case nil:
-                PullRequestOpenIcon(color: color)
             }
         }
     }
