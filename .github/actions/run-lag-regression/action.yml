@@ -3,7 +3,7 @@ description: Build cmux on WarpBuild and run the workspace churn typing-lag regr
 outputs:
   test_started:
     description: Whether the lag regression step started.
-    value: ${{ steps.mark-test-started.outputs.test_started }}
+    value: ${{ steps.run-lag-regression.outputs.test_started }}
   passed:
     description: Whether the lag regression passed.
     value: ${{ steps.mark-passed.outputs.passed }}
@@ -116,15 +116,12 @@ runs:
         echo "VDISPLAY_PID=$VDISPLAY_PID" >> "$GITHUB_ENV"
         sleep 3
 
-    - name: Mark lag regression test started
-      id: mark-test-started
-      shell: bash
-      run: echo "test_started=true" >> "$GITHUB_OUTPUT"
-
     - name: Run workspace churn typing-lag regression
+      id: run-lag-regression
       shell: bash
       run: |
         set -euo pipefail
+        echo "test_started=true" >> "$GITHUB_OUTPUT"
 
         APP="$(find "$HOME/Library/Developer/Xcode/DerivedData" -path "*/Build/Products/Debug/cmux DEV.app" -print -quit)"
         if [ -z "${APP:-}" ] || [ ! -d "$APP" ]; then

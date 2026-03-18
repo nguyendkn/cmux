@@ -3,7 +3,7 @@ description: Run the display resolution churn XCUITest on WarpBuild.
 outputs:
   test_started:
     description: Whether the display regression step started.
-    value: ${{ steps.mark-test-started.outputs.test_started }}
+    value: ${{ steps.run-display-regression.outputs.test_started }}
   passed:
     description: Whether the display regression passed.
     value: ${{ steps.mark-passed.outputs.passed }}
@@ -79,15 +79,12 @@ runs:
           sleep $((attempt * 5))
         done
 
-    - name: Mark display regression test started
-      id: mark-test-started
-      shell: bash
-      run: echo "test_started=true" >> "$GITHUB_OUTPUT"
-
     - name: Run display resolution churn UI regression
+      id: run-display-regression
       shell: bash
       run: |
         set -euo pipefail
+        echo "test_started=true" >> "$GITHUB_OUTPUT"
         SOURCE_PACKAGES_DIR="$PWD/.ci-source-packages"
         HELPER_PATH="/tmp/create-virtual-display"
         MANIFEST_PATH="/tmp/cmux-ui-test-display-harness.json"
