@@ -38,8 +38,7 @@ final class SettingsAccountUITests: XCTestCase {
         app.launchEnvironment["CMUX_UI_TEST_AUTH_TEAM_ID"] = "team_alpha"
         app.launchEnvironment["CMUX_UI_TEST_AUTH_TEAM_NAME"] = "Alpha"
         app.launchEnvironment["CMUX_UI_TEST_CAPTURE_OPEN_URL_PATH"] = captureURL.path
-        app.launch()
-        app.activate()
+        launchAndActivate(app)
 
         XCTAssertTrue(
             settingsAccountPollUntil(timeout: 6.0) { app.windows.count >= 2 },
@@ -124,5 +123,23 @@ final class SettingsAccountUITests: XCTestCase {
             return candidates[0]
         }
         return element
+    }
+
+    private func launchAndActivate(_ app: XCUIApplication, activateTimeout: TimeInterval = 2.0) {
+        app.launch()
+        let activated = settingsAccountPollUntil(timeout: activateTimeout) {
+            guard app.state != .runningForeground else {
+                return true
+            }
+            app.activate()
+            return app.state == .runningForeground
+        }
+        if !activated {
+            app.activate()
+        }
+        XCTAssertTrue(
+            settingsAccountPollUntil(timeout: 6.0) { app.state == .runningForeground },
+            "App did not reach runningForeground before UI interactions"
+        )
     }
 }
