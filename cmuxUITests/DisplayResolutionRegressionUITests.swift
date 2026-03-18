@@ -26,7 +26,10 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         launchTag = "ui-tests-display-resolution-\(token.prefix(8))"
         socketPath = "/tmp/cmux-ui-test-display-churn-\(token).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-display-churn-\(token).json"
-        launchManifestPath = "/tmp/cmux-ui-test-display-launch-\(token).json"
+        launchManifestPath = repoRootURL
+            .appendingPathComponent(".cmux-ui-test-artifacts", isDirectory: true)
+            .appendingPathComponent("cmux-ui-test-display-launch-\(token).json")
+            .path
         displayReadyPath = "/tmp/cmux-ui-test-display-ready-\(token)"
         displayIDPath = "/tmp/cmux-ui-test-display-id-\(token)"
         displayStartPath = "/tmp/cmux-ui-test-display-start-\(token)"
@@ -253,6 +256,10 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         let payload = LaunchManifest(environment: launchEnvironment(targetDisplayID: targetDisplayID))
         let data = try JSONEncoder().encode(payload)
         let manifestURL = URL(fileURLWithPath: launchManifestPath)
+        try FileManager.default.createDirectory(
+            at: manifestURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         FileManager.default.createFile(atPath: manifestURL.path, contents: nil)
         try data.write(to: manifestURL)
     }
