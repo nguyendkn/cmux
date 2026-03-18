@@ -64,10 +64,12 @@ final class DisplayResolutionRegressionUITests: XCTestCase {
         var maxDiagnosticsUpdatedAt = baselineStats.diagnosticsUpdatedAt
         var lastStats = baselineStats
 
-        XCTAssertTrue(
-            FileManager.default.createFile(atPath: displayStartPath, contents: Data("start\n".utf8)),
-            "Expected start signal file to be created"
-        )
+        do {
+            try Data("start\n".utf8).write(to: URL(fileURLWithPath: displayStartPath), options: .atomic)
+        } catch {
+            XCTFail("Expected start signal file to be created at \(displayStartPath): \(error)")
+            return
+        }
 
         let deadline = Date().addingTimeInterval(30.0)
         while Date() < deadline {
