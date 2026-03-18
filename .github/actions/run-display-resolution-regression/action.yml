@@ -30,7 +30,15 @@ runs:
         xcodebuild -version
         xcrun --sdk macosx --show-sdk-path
 
+    - name: Cache GhosttyKit.xcframework
+      id: cache-ghosttykit-display
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+      with:
+        path: GhosttyKit.xcframework
+        key: ghosttykit-${{ hashFiles('.gitmodules', 'ghostty') }}
+
     - name: Download pre-built GhosttyKit.xcframework
+      if: steps.cache-ghosttykit-display.outputs.cache-hit != 'true'
       shell: bash
       run: ./scripts/download-prebuilt-ghosttykit.sh
 
@@ -95,9 +103,7 @@ runs:
         clang -framework Foundation -framework CoreGraphics \
           -o "$HELPER_PATH" scripts/create-virtual-display.m
 
-        cat >"$MANIFEST_PATH" <<EOF
-        {"helperBinaryPath":"$HELPER_PATH"}
-        EOF
+        printf '{"helperBinaryPath":"%s"}\n' "$HELPER_PATH" >"$MANIFEST_PATH"
 
         xcodebuild -project GhosttyTabs.xcodeproj -scheme cmux -configuration Debug \
           -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \

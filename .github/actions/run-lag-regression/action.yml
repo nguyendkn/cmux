@@ -166,3 +166,11 @@ runs:
       id: mark-passed
       shell: bash
       run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+    - name: Stop virtual display
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        if [ -n "${VDISPLAY_PID:-}" ]; then
+          kill "$VDISPLAY_PID" >/dev/null 2>&1 || true
+        fi
