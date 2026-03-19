@@ -11879,6 +11879,114 @@ final class GhosttySurfaceOverlayTests: XCTestCase {
         )
     }
 
+    func testVisibleHostedSurfaceMarksTerminalSurfaceVisibleForGhostty() {
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        let hostedView = surface.hostedView
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            TerminalSurface.resetDebugOcclusionTracking()
+            window.orderOut(nil)
+        }
+
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        var events: [Bool] = []
+        TerminalSurface.resetDebugOcclusionTracking()
+        TerminalSurface.setDebugOcclusionObserver { observedSurfaceId, visible in
+            guard observedSurfaceId == surface.id else { return }
+            events.append(visible)
+        }
+
+        hostedView.frame = contentView.bounds
+        hostedView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostedView)
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        hostedView.setVisibleInUI(true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(
+            TerminalSurface.debugLastOcclusion(for: surface.id),
+            true,
+            "Visible hosted terminal should mark the Ghostty surface visible"
+        )
+        XCTAssertTrue(
+            events.contains(true),
+            "Expected a visible occlusion update when the hosted terminal becomes visible"
+        )
+    }
+
+    func testHidingHostedSurfaceMarksTerminalSurfaceHiddenForGhostty() {
+        let surface = TerminalSurface(
+            tabId: UUID(),
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: nil
+        )
+        let hostedView = surface.hostedView
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 240),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            TerminalSurface.resetDebugOcclusionTracking()
+            window.orderOut(nil)
+        }
+
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        var events: [Bool] = []
+        TerminalSurface.resetDebugOcclusionTracking()
+        TerminalSurface.setDebugOcclusionObserver { observedSurfaceId, visible in
+            guard observedSurfaceId == surface.id else { return }
+            events.append(visible)
+        }
+
+        hostedView.frame = contentView.bounds
+        hostedView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostedView)
+
+        window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+        hostedView.setVisibleInUI(true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        events.removeAll()
+
+        hostedView.setVisibleInUI(false)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(
+            TerminalSurface.debugLastOcclusion(for: surface.id),
+            false,
+            "Hidden hosted terminal should mark the Ghostty surface hidden"
+        )
+        XCTAssertTrue(
+            events.contains(false),
+            "Expected a hidden occlusion update when the hosted terminal is hidden"
+        )
+    }
+
     func testSearchOverlayMountsAndUnmountsWithSearchState() {
         let surface = TerminalSurface(
             tabId: UUID(),

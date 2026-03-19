@@ -235,7 +235,7 @@ def main() -> int:
     frame_count = int(os.environ.get("CMUX_PANE_STRIP_MOTION_FRAMES", "36"))
     scenarios = os.environ.get(
         "CMUX_PANE_STRIP_MOTION_SCENARIOS",
-        "initial_terminal_visible,focus_reveal_right,pan_viewport_right,open_pane_right,browser_focus_reveal_right",
+        "initial_terminal_visible,initial_terminal_renders_after_input,focus_reveal_right,pan_viewport_right,open_pane_right,browser_focus_reveal_right",
     ).split(",")
     scenarios = [s.strip() for s in scenarios if s.strip()]
 

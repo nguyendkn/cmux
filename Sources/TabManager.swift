@@ -4171,7 +4171,16 @@ class TabManager: ObservableObject {
         quitWhenDone: Bool
     ) async {
         let crop = CGRect(x: 0.04, y: 0.01, width: 0.92, height: 0.08)
-        let actionFrame = (scenario == "initial_terminal_visible") ? 0 : 4
+        let actionFrame: Int = {
+            switch scenario {
+            case "initial_terminal_visible":
+                return 0
+            case "initial_terminal_renders_after_input":
+                return 1
+            default:
+                return 4
+            }
+        }()
         // Freshly revealed panes can take a few display-link ticks to promote a non-blank
         // IOSurface under GitHub's virtual-display environment. Keep the CI harness tolerant
         // of that short bootstrap window while still failing sustained blank/overlap cases.
@@ -4477,6 +4486,35 @@ class TabManager: ObservableObject {
                 extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
                 extra["timelineTrace"] = result.trace.joined(separator: "|")
                 fail("Initial terminal never produced visible content during capture", extra: extra)
+                return
+            }
+
+        case "initial_terminal_renders_after_input":
+            result = await capturePaneStripMotionTimeline(
+                frameCount: frameCount,
+                actionFrame: actionFrame,
+                targets: [
+                    .init(
+                        label: "T",
+                        sample: { @MainActor in motionSample(for: sourcePanelId) },
+                        expectedPanelId: { sourcePanelId },
+                        renderSurfaceFromWindowCapture: true
+                    ),
+                ],
+                hitTestPanelIdAtWindowPoint: hitTestPanelIdAtWindowPoint,
+                actions: [
+                    (frame: actionFrame, action: {
+                        primeTerminalContent(sourcePanelId, label: "INITIAL")
+                    }),
+                ]
+            )
+
+            if result.nonBlankSampleCounts["T", default: 0] == 0 {
+                var extra = terminalVisibilityDebugInfo(for: sourcePanelId)
+                extra["sampleCounts"] = debugJSONString(result.sampleCounts)
+                extra["nonBlankSampleCounts"] = debugJSONString(result.nonBlankSampleCounts)
+                extra["timelineTrace"] = result.trace.joined(separator: "|")
+                fail("Initial terminal remained blank after explicit input", extra: extra)
                 return
             }
 
