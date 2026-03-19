@@ -3291,6 +3291,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         guard let refreshedSurface = self.surface else { return }
         ghostty_surface_refresh(refreshedSurface)
+        GhosttyApp.shared.tick()
+        view.displayIfNeeded()
+        window.contentView?.displayIfNeeded()
+        window.displayIfNeeded()
         CATransaction.flush()
 
 #if DEBUG
