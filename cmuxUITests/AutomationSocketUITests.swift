@@ -65,16 +65,10 @@ final class AutomationSocketUITests: XCTestCase {
         }
         socketPath = resolvedPath
 
-        XCTAssertTrue(
-            waitForCondition(timeout: 10.0) {
-                guard let payload = self.socketV2(method: "surface.list", responseTimeout: 3.0),
-                      let surfaces = payload["surfaces"] as? [[String: Any]] else {
-                    return false
-                }
-                return !surfaces.isEmpty
-            },
-            "Expected surface.list to return at least one surface before stress loop"
-        )
+        guard let target = ensureTerminalSurface(timeout: 10.0) else {
+            XCTFail("Expected a terminal surface before repeated send-key socket test")
+            return
+        }
 
         for iteration in 1...8 {
             XCTAssertEqual(
@@ -84,7 +78,15 @@ final class AutomationSocketUITests: XCTestCase {
             )
 
             XCTAssertNotNil(
-                socketV2(method: "surface.send_key", params: ["key": "enter"], responseTimeout: 4.0),
+                socketV2(
+                    method: "surface.send_key",
+                    params: [
+                        "workspace_id": target.workspaceId,
+                        "surface_id": target.surfaceId,
+                        "key": "enter",
+                    ],
+                    responseTimeout: 4.0
+                ),
                 "Expected surface.send_key to succeed on iteration \(iteration)"
             )
 
@@ -94,7 +96,11 @@ final class AutomationSocketUITests: XCTestCase {
                 "Expected ping after send_key on iteration \(iteration)"
             )
 
-            guard let payload = socketV2(method: "surface.list", responseTimeout: 4.0),
+            guard let payload = socketV2(
+                method: "surface.list",
+                params: ["workspace_id": target.workspaceId],
+                responseTimeout: 4.0
+            ),
                   let surfaces = payload["surfaces"] as? [[String: Any]] else {
                 XCTFail("Expected surface.list to respond after send_key on iteration \(iteration)")
                 return
@@ -215,6 +221,39 @@ final class AutomationSocketUITests: XCTestCase {
             return nil
         }
         return (response["result"] as? [String: Any]) ?? [:]
+    }
+
+    private func ensureTerminalSurface(timeout: TimeInterval) -> (workspaceId: String, surfaceId: String)? {
+        if let target = currentTerminalSurface() {
+            return target
+        }
+
+        guard let workspacePayload = socketV2(method: "workspace.create", responseTimeout: 4.0),
+              let workspaceId = workspacePayload["workspace_id"] as? String else {
+            return nil
+        }
+
+        let ready = waitForCondition(timeout: timeout) {
+            self.currentTerminalSurface(workspaceId: workspaceId) != nil
+        }
+        guard ready else { return nil }
+        return currentTerminalSurface(workspaceId: workspaceId)
+    }
+
+    private func currentTerminalSurface(
+        workspaceId: String? = nil
+    ) -> (workspaceId: String, surfaceId: String)? {
+        var params: [String: Any] = [:]
+        if let workspaceId {
+            params["workspace_id"] = workspaceId
+        }
+        guard let payload = socketV2(method: "surface.current", params: params, responseTimeout: 3.0),
+              let resolvedWorkspaceId = payload["workspace_id"] as? String,
+              let surfaceId = payload["surface_id"] as? String,
+              !surfaceId.isEmpty else {
+            return nil
+        }
+        return (workspaceId: resolvedWorkspaceId, surfaceId: surfaceId)
     }
 
     private func socketCommandViaNetcat(_ cmd: String, responseTimeout: TimeInterval = 2.0) -> String? {
