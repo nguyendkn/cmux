@@ -108,14 +108,22 @@ for target in "${TARGETS[@]}"; do
       ;;
   esac
 
+  BUILD_PREFIX="$(mktemp -d "${TMPDIR:-/tmp}/cmuxd-remote-prefix.${GOOS}-${GOARCH}.XXXXXX")"
+  BUILD_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cmuxd-remote-cache.${GOOS}-${GOARCH}.XXXXXX")"
+  BUILD_GLOBAL_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cmuxd-remote-global-cache.${GOOS}-${GOARCH}.XXXXXX")"
+
   (
     cd "$DAEMON_ROOT"
     zig build \
       -Doptimize=ReleaseSafe \
       -Dtarget="${ZIG_TARGET}" \
-      -Dversion="${VERSION}"
+      -Dversion="${VERSION}" \
+      --prefix "$BUILD_PREFIX" \
+      --cache-dir "$BUILD_CACHE_DIR" \
+      --global-cache-dir "$BUILD_GLOBAL_CACHE_DIR"
   )
-  cp "${DAEMON_ROOT}/zig-out/bin/cmuxd-remote" "$OUTPUT_PATH"
+  cp "${BUILD_PREFIX}/bin/cmuxd-remote" "$OUTPUT_PATH"
+  rm -rf "$BUILD_PREFIX" "$BUILD_CACHE_DIR" "$BUILD_GLOBAL_CACHE_DIR"
   chmod 755 "$OUTPUT_PATH"
 
   SHA256="$(shasum -a 256 "$OUTPUT_PATH" | awk '{print $1}')"
