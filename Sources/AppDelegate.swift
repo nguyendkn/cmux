@@ -13,6 +13,26 @@ private enum CmuxThemeNotifications {
     static let reloadConfig = Notification.Name("com.cmuxterm.themes.reload-config")
 }
 
+/// Keeps cmux main windows on the standard titled/resizable AppKit path so native
+/// Window > Move & Resize remains available, while still allowing custom titlebar UI.
+func applyMainWindowConfiguration(to window: NSWindow) {
+    var styleMask = window.styleMask
+    styleMask.insert([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+    if styleMask != window.styleMask {
+        window.styleMask = styleMask
+    }
+
+    window.titleVisibility = .hidden
+    window.titlebarAppearsTransparent = true
+    window.isMovableByWindowBackground = false
+
+    // Folder/proxy drag paths temporarily suppress movability on purpose. Outside
+    // those guarded interactions, always restore the standard movable window state.
+    if !isWindowDragSuppressed(window: window), !window.isMovable {
+        window.isMovable = true
+    }
+}
+
 #if DEBUG
 enum CmuxTypingTiming {
     static let isEnabled: Bool = {
@@ -5467,10 +5487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             defer: false
         )
         window.title = ""
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = false
-        window.isMovable = false
+        applyMainWindowConfiguration(to: window)
         let restoredFrame = resolvedWindowFrame(from: sessionWindowSnapshot)
         if let restoredFrame {
             window.setFrame(restoredFrame, display: false)

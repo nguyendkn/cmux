@@ -223,7 +223,6 @@ struct cmuxApp: App {
                     updateSocketController()
                 }
         }
-        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button(String(localized: "menu.app.settings", defaultValue: "Settings…")) {

@@ -42,6 +42,69 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         super.tearDown()
     }
 
+    func testCreateMainWindowPreservesNativeMoveResizeEligibility() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        guard let window = window(withId: windowId) else {
+            XCTFail("Expected created main window")
+            return
+        }
+
+        XCTAssertTrue(window.styleMask.contains(.titled))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertTrue(window.isMovable, "Main windows must stay movable so macOS enables Window > Move & Resize.")
+        XCTAssertFalse(window.isMovableByWindowBackground)
+        XCTAssertEqual(window.titleVisibility, .hidden)
+    }
+
+    func testApplyMainWindowConfigurationRestoresMovableWhenNotSuppressed() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isMovable = false
+
+        applyMainWindowConfiguration(to: window)
+
+        XCTAssertTrue(window.styleMask.contains(.titled))
+        XCTAssertTrue(window.styleMask.contains(.closable))
+        XCTAssertTrue(window.styleMask.contains(.miniaturizable))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertTrue(window.isMovable)
+        XCTAssertFalse(window.isMovableByWindowBackground)
+        XCTAssertEqual(window.titleVisibility, .hidden)
+    }
+
+    func testApplyMainWindowConfigurationKeepsSuppressedWindowImmovableUntilSuppressionEnds() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isMovable = false
+        _ = beginWindowDragSuppression(window: window)
+
+        applyMainWindowConfiguration(to: window)
+        XCTAssertFalse(window.isMovable)
+
+        _ = endWindowDragSuppression(window: window)
+        applyMainWindowConfiguration(to: window)
+        XCTAssertTrue(window.isMovable)
+    }
+
     func testCmdNUsesEventWindowContextWhenActiveManagerIsStale() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")

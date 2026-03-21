@@ -2737,14 +2737,7 @@ struct ContentView: View {
 
         view = AnyView(view.background(WindowAccessor { [sidebarBlendMode, bgGlassEnabled, bgGlassTintHex, bgGlassTintOpacity] window in
             window.identifier = NSUserInterfaceItemIdentifier(windowIdentifier)
-            window.titlebarAppearsTransparent = true
-            // Do not make the entire background draggable; it interferes with drag gestures
-            // like sidebar tab reordering in multi-window mode.
-            window.isMovableByWindowBackground = false
-            // Keep the window immovable by default so titlebar controls (like the folder icon)
-            // cannot accidentally initiate native window drags.
-            window.isMovable = false
-            window.styleMask.insert(.fullSizeContentView)
+            applyMainWindowConfiguration(to: window)
 
             // Track this window for fullscreen notifications
             if observedWindow !== window {
