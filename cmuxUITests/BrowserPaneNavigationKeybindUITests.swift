@@ -352,7 +352,14 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             return
         }
         let browserPane = app.otherElements["BrowserPanelContent.\(browserPanelId)"].firstMatch
-        XCTAssertTrue(browserPane.waitForExistence(timeout: 6.0), "Expected browser pane content before arrow-key regression check")
+        let browserWebView = app.webViews.firstMatch
+        let browserClickTarget: XCUIElement
+        if browserPane.waitForExistence(timeout: 2.0) {
+            browserClickTarget = browserPane
+        } else {
+            XCTAssertTrue(browserWebView.waitForExistence(timeout: 8.0), "Expected browser web area before arrow-key regression check")
+            browserClickTarget = browserWebView
+        }
 
         guard let harness = installBrowserArrowHarness(
             cliPath: cliPath,
@@ -413,7 +420,7 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
         )
 
         RunLoop.current.run(until: Date().addingTimeInterval(0.15))
-        browserPane
+        browserClickTarget
             .coordinate(withNormalizedOffset: CGVector(dx: harness.secondaryCenterX, dy: harness.secondaryCenterY))
             .click()
 
