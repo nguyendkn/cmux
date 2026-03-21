@@ -19,13 +19,11 @@ final class AutomationSocketUITests: XCTestCase {
     private let defaultsDomain = "com.cmuxterm.app.debug"
     private let modeKey = "socketControlMode"
     private let legacyKey = "socketControlEnabled"
-    private var launchTag = ""
 
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
-        launchTag = "ui-tests-automation-socket-\(UUID().uuidString.prefix(8).lowercased())"
-        socketPath = "/tmp/cmux-debug-\(launchTag).sock"
+        socketPath = "/tmp/cmux-ui-test-automation-socket-\(UUID().uuidString).sock"
         diagnosticsPath = "/tmp/cmux-ui-test-diagnostics-\(UUID().uuidString).json"
         ensureTerminalSurfaceFailure = ""
         lastPingResponse = ""
@@ -136,12 +134,10 @@ final class AutomationSocketUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-\(modeKey)", mode]
         app.launchEnvironment["CMUX_SOCKET_PATH"] = socketPath
+        app.launchEnvironment["CMUX_UI_TEST_MODE"] = "1"
         app.launchEnvironment["CMUX_SOCKET_MODE"] = mode
         app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
         app.launchEnvironment["CMUX_UI_TEST_DIAGNOSTICS_PATH"] = diagnosticsPath
-        // Debug launches require a tag outside reload.sh; provide one in UITests so CI
-        // does not fail with "Application ... does not have a process ID".
-        app.launchEnvironment["CMUX_TAG"] = launchTag
         return app
     }
 
@@ -454,9 +450,6 @@ final class AutomationSocketUITests: XCTestCase {
         for productsDir in uniquePaths(productDirectories) {
             appendCLIPathCandidates(fromProductsDirectory: productsDir, to: &candidates)
         }
-
-        candidates.append("/tmp/cmux-\(launchTag)/Build/Products/Debug/cmux DEV.app/Contents/Resources/bin/cmux")
-        candidates.append("/tmp/cmux-\(launchTag)/Build/Products/Debug/cmux.app/Contents/Resources/bin/cmux")
 
         var resolvedPaths: [String] = []
         for path in uniquePaths(candidates) {
