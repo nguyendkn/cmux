@@ -32,11 +32,15 @@ final class AutomationSocketUITests: XCTestCase {
         resetSocketDefaults()
         removeSocketFile()
         try? FileManager.default.removeItem(atPath: diagnosticsPath)
+
+        let cleanup = XCUIApplication()
+        cleanup.terminate()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
     }
 
     func testSocketToggleDisablesAndEnables() {
         let app = configuredApp(mode: "cmuxOnly")
-        app.launch()
+        launchAndActivate(app)
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch for socket toggle test. state=\(app.state.rawValue)"
@@ -53,7 +57,7 @@ final class AutomationSocketUITests: XCTestCase {
 
     func testSocketDisabledWhenSettingOff() {
         let app = configuredApp(mode: "off")
-        app.launch()
+        launchAndActivate(app)
         XCTAssertTrue(
             ensureForegroundAfterLaunch(app, timeout: 12.0),
             "Expected app to launch for socket off test. state=\(app.state.rawValue)"
@@ -65,7 +69,7 @@ final class AutomationSocketUITests: XCTestCase {
 
     func testSurfaceListStillRespondsAfterRepeatedSendKey() {
         let app = configuredApp(mode: "automation")
-        app.launch()
+        launchAndActivate(app)
         defer {
             if app.state != .notRunning {
                 app.terminate()
@@ -139,6 +143,11 @@ final class AutomationSocketUITests: XCTestCase {
         // does not fail with "Application ... does not have a process ID".
         app.launchEnvironment["CMUX_TAG"] = launchTag
         return app
+    }
+
+    private func launchAndActivate(_ app: XCUIApplication) {
+        app.launch()
+        app.activate()
     }
 
     private func ensureForegroundAfterLaunch(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
