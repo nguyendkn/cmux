@@ -18,10 +18,35 @@ find_real_claude() {
     return 1
 }
 
-# Return 0 for Claude global options that require a separate value.
-claude_option_requires_value() {
+# Return 0 for Claude global options that require exactly one separate value.
+claude_option_requires_single_value() {
     case "${1:-}" in
-        --add-dir|--agent|--agents|--allowedTools|--allowed-tools|--append-system-prompt|--betas|--debug-file|--disallowedTools|--disallowed-tools|--effort|--fallback-model|--file|--input-format|--json-schema|--max-budget-usd|--mcp-config|--model|--name|--output-format|--permission-mode|--plugin-dir|--session-id|--setting-sources|--settings|--system-prompt|--tools|-n)
+        --agent|--agents|--append-system-prompt|--debug-file|--effort|--fallback-model|--input-format|--json-schema|--max-budget-usd|--model|--name|--output-format|--permission-mode|--plugin-dir|--session-id|--setting-sources|--settings|--system-prompt|-n)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Return 0 for Claude global options whose separate-value form consumes all
+# following positional values until the next option token.
+claude_option_takes_variadic_values() {
+    case "${1:-}" in
+        --add-dir|--allowedTools|--allowed-tools|--betas|--disallowedTools|--disallowed-tools|--file|--mcp-config|--tools)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Return 0 for Claude global options with an optional separate value.
+claude_option_may_take_value() {
+    case "${1:-}" in
+        --debug|--from-pr|--resume|--worktree|-d|-r|-w)
             return 0
             ;;
         *)
@@ -31,11 +56,11 @@ claude_option_requires_value() {
 }
 
 # Return 0 when the first Claude subcommand should bypass cmux hook/session
-# injection entirely. These commands manage Claude itself rather than launching
-# a normal interactive coding session, and some of them reject --session-id.
+# injection entirely. Keep this list limited to real management commands so
+# prompts like "help" or legacy aliases do not get misclassified.
 claude_passthrough_subcommand() {
     case "${1:-}" in
-        api-key|auth|config|doctor|help|install|mcp|plugin|plugins|rc|remote-control|setup-token|update|upgrade)
+        agents|auth|doctor|install|mcp|plugin|plugins|rc|remote-control|setup-token|update|upgrade)
             return 0
             ;;
         *)
@@ -46,12 +71,31 @@ claude_passthrough_subcommand() {
 
 claude_invocation_has_passthrough_subcommand() {
     local arg
-    local pending_value=0
+    local pending_required_value=0
+    local pending_optional_value=0
+    local pending_variadic_values=0
 
     for arg in "$@"; do
-        if [[ "$pending_value" == "1" ]]; then
-            pending_value=0
+        if [[ "$pending_required_value" == "1" ]]; then
+            pending_required_value=0
             continue
+        fi
+
+        if [[ "$pending_optional_value" == "1" ]]; then
+            pending_optional_value=0
+            if [[ "$arg" != -- && "$arg" != -* ]]; then
+                continue
+            fi
+        fi
+
+        if [[ "$pending_variadic_values" == "1" ]]; then
+            if [[ "$arg" == -- ]]; then
+                return 1
+            fi
+            if [[ "$arg" != -* ]]; then
+                continue
+            fi
+            pending_variadic_values=0
         fi
 
         case "$arg" in
@@ -62,8 +106,12 @@ claude_invocation_has_passthrough_subcommand() {
                 continue
                 ;;
             -*)
-                if claude_option_requires_value "$arg"; then
-                    pending_value=1
+                if claude_option_requires_single_value "$arg"; then
+                    pending_required_value=1
+                elif claude_option_takes_variadic_values "$arg"; then
+                    pending_variadic_values=1
+                elif claude_option_may_take_value "$arg"; then
+                    pending_optional_value=1
                 fi
                 continue
                 ;;
@@ -128,7 +176,7 @@ fi
 SKIP_SESSION_ID=false
 for arg in "$@"; do
     case "$arg" in
-        --resume|--resume=*|--session-id|--session-id=*|--continue|-c)
+        --resume|--resume=*|--from-pr|--from-pr=*|--session-id|--session-id=*|--continue|-c|-r)
             SKIP_SESSION_ID=true
             break
             ;;
