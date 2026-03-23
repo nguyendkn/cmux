@@ -102,3 +102,77 @@ jobs:
             --notes "Pre-built GhosttyKit.xcframework for commit ${{ steps.ghostty-sha.outputs.sha }}" \
             GhosttyKit.xcframework.tar.gz
           echo "Published release $TAG"
+
+  build-ghosttykit-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Get ghostty SHA
+        id: ghostty-sha
+        run: |
+          SHA=$(git -C ghostty rev-parse HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Ghostty SHA: $SHA"
+
+      - name: Install Zig
+        run: |
+          set -euo pipefail
+          ZIG_REQUIRED="0.15.2"
+          if command -v zig >/dev/null 2>&1 && zig version 2>/dev/null | grep -q "^${ZIG_REQUIRED}"; then
+            echo "zig ${ZIG_REQUIRED} already installed"
+          else
+            echo "Installing zig ${ZIG_REQUIRED} for Linux x86_64"
+            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-linux-x86_64-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
+            tar xf /tmp/zig.tar.xz -C /tmp
+            sudo mkdir -p /usr/local/bin /usr/local/lib
+            sudo cp -f /tmp/zig-linux-x86_64-${ZIG_REQUIRED}/zig /usr/local/bin/zig
+            sudo cp -rf /tmp/zig-linux-x86_64-${ZIG_REQUIRED}/lib /usr/local/lib/zig
+            export PATH="/usr/local/bin:$PATH"
+            zig version
+          fi
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-4-dev libadwaita-1-dev libglib2.0-dev libpango1.0-dev libatk1.0-dev
+
+      - name: Build libghostty for Linux
+        run: |
+          set -euo pipefail
+          export PATH="/usr/local/bin:$PATH"
+          cd ghostty && zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu
+
+      - name: Build libghostty for Linux ARM64
+        run: |
+          set -euo pipefail
+          export PATH="/usr/local/bin:$PATH"
+          cd ghostty && zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux-gnu
+
+      - name: Package libghostty
+        run: |
+          set -euo pipefail
+          mkdir -p libghostty-linux
+          cd ghostty && zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-gnu -DinstallBin=false -DinstallLib=true
+          cp -L ./zig-out/lib/libghostty.so.1 libghostty-linux/libghostty-x86_64.so.1
+          cd ghostty && zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux-gnu -DinstallBin=false -DinstallLib=true
+          cp -L ./zig-out/lib/libghostty.so.1 libghostty-linux/libghostty-aarch64.so.1
+          tar czf libghostty-linux.tar.gz libghostty-linux/
+
+      - name: Upload libghostty release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="libghostty-${{ steps.ghostty-sha.outputs.sha }}"
+          gh release create "$TAG" \
+            --repo manaflow-ai/ghostty \
+            --title "libghostty for Linux (${{ steps.ghostty-sha.outputs.sha }})" \
+            --notes "Pre-built libghostty shared libraries for Linux (x86_64 and ARM64)" \
+            libghostty-linux.tar.gz
+          echo "Published release $TAG"
