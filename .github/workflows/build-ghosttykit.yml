@@ -72,11 +72,13 @@ jobs:
             echo "zig ${ZIG_REQUIRED} already installed"
           else
             echo "Installing zig ${ZIG_REQUIRED} from tarball"
-            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-aarch64-macos-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "arm64" ]; then ARCH="aarch64"; fi
+            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-${ARCH}-macos-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
             tar xf /tmp/zig.tar.xz -C /tmp
             sudo mkdir -p /usr/local/bin /usr/local/lib
-            sudo cp -f /tmp/zig-aarch64-macos-${ZIG_REQUIRED}/zig /usr/local/bin/zig
-            sudo cp -rf /tmp/zig-aarch64-macos-${ZIG_REQUIRED}/lib /usr/local/lib/zig
+            sudo cp -f /tmp/zig-${ARCH}-macos-${ZIG_REQUIRED}/zig /usr/local/bin/zig
+            sudo cp -rf /tmp/zig-${ARCH}-macos-${ZIG_REQUIRED}/lib /usr/local/lib/zig
             export PATH="/usr/local/bin:$PATH"
             zig version
           fi
@@ -128,11 +130,11 @@ jobs:
             echo "zig ${ZIG_REQUIRED} already installed"
           else
             echo "Installing zig ${ZIG_REQUIRED} for Linux x86_64"
-            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-linux-x86_64-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
+            curl -fSL "https://ziglang.org/download/${ZIG_REQUIRED}/zig-x86_64-linux-${ZIG_REQUIRED}.tar.xz" -o /tmp/zig.tar.xz
             tar xf /tmp/zig.tar.xz -C /tmp
             sudo mkdir -p /usr/local/bin /usr/local/lib
-            sudo cp -f /tmp/zig-linux-x86_64-${ZIG_REQUIRED}/zig /usr/local/bin/zig
-            sudo cp -rf /tmp/zig-linux-x86_64-${ZIG_REQUIRED}/lib /usr/local/lib/zig
+            sudo cp -f /tmp/zig-x86_64-linux-${ZIG_REQUIRED}/zig /usr/local/bin/zig
+            sudo cp -rf /tmp/zig-x86_64-linux-${ZIG_REQUIRED}/lib /usr/local/lib/zig
             export PATH="/usr/local/bin:$PATH"
             zig version
           fi
