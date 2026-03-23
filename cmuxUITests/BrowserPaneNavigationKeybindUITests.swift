@@ -1457,6 +1457,9 @@ final class BrowserPaneNavigationKeybindUITests: XCTestCase {
             app.launchEnvironment["CMUX_UI_TEST_SOCKET_SANITY"] = "1"
         }
         if app.launchEnvironment["CMUX_SOCKET_PATH"] != nil {
+            if app.launchEnvironment["CMUX_ALLOW_SOCKET_OVERRIDE"] == nil {
+                app.launchEnvironment["CMUX_ALLOW_SOCKET_OVERRIDE"] = "1"
+            }
             if !app.launchArguments.contains("-socketControlMode") {
                 app.launchArguments += ["-socketControlMode", "allowAll"]
             }
