@@ -1,6 +1,7 @@
 name: Build GhosttyKit
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
